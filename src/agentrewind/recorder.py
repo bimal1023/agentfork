@@ -6,12 +6,22 @@ _parent_step = contextvars.ContextVar("parent_step", default=None)
 _seq = contextvars.ContextVar("seq", default=None)
 _replay = contextvars.ContextVar("replay", default=None)
 
-DECODERS = {}
+_LLM_DECODERS = {}
 last_run_id = None
 last_run_seq = 0
 
 class ReplayMismatch(AssertionError):
     """The agent did something different from the recorded run."""
+
+def _decode_llm(data):
+    if isinstance(data, dict):
+        if data.get("object") == "chat.completion" and "openai" in _LLM_DECODERS:
+            return _LLM_DECODERS["openai"](data)
+        if data.get("type") == "message" and "anthropic" in _LLM_DECODERS:
+            return _LLM_DECODERS["anthropic"](data)
+    return data
+
+DECODERS = {"llm": _decode_llm}
 
 def to_jsonable(obj):
     if hasattr(obj, "model_dump"):
@@ -30,15 +40,25 @@ def dumps(obj):
 def make_cache_key(step_type, name, input_json):
     return hashlib.sha256(f"{step_type}|{name}|{input_json}".encode()).hexdigest()
 
-def _apply_override(step_type, kwargs, override):
+def _tokens(usage, *names):
+    for n in names:
+        value = getattr(usage, n, None)
+        if value is not None:
+            return value
+    return None
+
+def _apply_override(step_type, kwargs, override, provider=None):
     kwargs = dict(kwargs)
     if step_type == "llm":
         if override.get("model"):
             kwargs["model"] = override["model"]
         if override.get("system"):
-            msgs = [m for m in kwargs.get("messages", [])
-                    if not (isinstance(m, dict) and m.get("role") == "system")]
-            kwargs["messages"] = [{"role": "system", "content": override["system"]}] + msgs
+            if provider == "anthropic":
+                kwargs["system"] = override["system"]
+            else:
+                msgs = [m for m in kwargs.get("messages", [])
+                        if not (isinstance(m, dict) and m.get("role") == "system")]
+                kwargs["messages"] = [{"role": "system", "content": override["system"]}] + msgs
     return kwargs
 
 def _last_descendant_seq(steps, step):
@@ -58,7 +78,7 @@ def _explain_mismatch(seq, step_type, name, cached_step, input_json):
     diff = list(difflib.unified_diff(old, new, "recorded", "now", lineterm="", n=1))[:40]
     return f"step {seq} ({step_type} {name}) got different inputs than the recorded run\n" + "\n".join(diff)
 
-def record_step(step_type, name, fn, args, kwargs):
+def record_step(step_type, name, fn, args, kwargs, provider=None):
     run_id = _run_id.get()
     if run_id is None:
         return fn(*args, **kwargs)
@@ -77,7 +97,7 @@ def record_step(step_type, name, fn, args, kwargs):
         if "output" in replay["override"]:
             use_forced = True
         else:
-            kwargs = _apply_override(step_type, kwargs, replay["override"])
+            kwargs = _apply_override(step_type, kwargs, replay["override"], provider)
     input_json = dumps({"args": args, "kwargs": kwargs})
     key = make_cache_key(step_type, name, input_json)
     if cached_step is not None and cached_step["cache_key"] != key:
@@ -109,8 +129,8 @@ def record_step(step_type, name, fn, args, kwargs):
             "id": step_id, "run_id": run_id, "parent_id": parent, "seq": seq,
             "type": step_type, "name": name,
             "input_json": input_json, "output_json": dumps(output), "cache_key": key,
-            "tokens_in": getattr(usage, "prompt_tokens", None),
-            "tokens_out": getattr(usage, "completion_tokens", None),
+            "tokens_in": _tokens(usage, "prompt_tokens", "input_tokens"),
+            "tokens_out": _tokens(usage, "completion_tokens", "output_tokens"),
             "latency_ms": (time.time() - started) * 1000,
             "error": error, "started_at": started, "cached": cached,
         })
@@ -159,9 +179,18 @@ def tool(fn):
 
 def wrap_openai(client):
     from openai.types.chat import ChatCompletion
-    DECODERS["llm"] = ChatCompletion.model_validate
+    _LLM_DECODERS["openai"] = ChatCompletion.model_validate
     original = client.chat.completions.create
     def create(*args, **kwargs):
-        return record_step("llm", kwargs.get("model", "llm"), original, args, kwargs)
+        return record_step("llm", kwargs.get("model", "llm"), original, args, kwargs, provider="openai")
     client.chat.completions.create = create
+    return client
+
+def wrap_anthropic(client):
+    from anthropic.types import Message
+    _LLM_DECODERS["anthropic"] = Message.model_validate
+    original = client.messages.create
+    def create(*args, **kwargs):
+        return record_step("llm", kwargs.get("model", "llm"), original, args, kwargs, provider="anthropic")
+    client.messages.create = create
     return client
