@@ -39,3 +39,21 @@ def insert(table, row):
 def update_run(run_id, **fields):
     sets = ", ".join(f"{k}=?" for k in fields)
     _exec(f"UPDATE runs SET {sets} WHERE id=?", [*fields.values(), run_id])
+
+def query(sql, params=()):
+    with closing(connect()) as conn:
+        conn.row_factory = sqlite3.Row
+        return [dict(r) for r in conn.execute(sql, params)]
+
+def list_runs(limit=10):
+    return query("""
+        SELECT r.*, COUNT(s.id) AS n_steps,
+               COALESCE(SUM(s.tokens_in), 0) + COALESCE(SUM(s.tokens_out), 0) AS tokens
+        FROM runs r LEFT JOIN steps s ON s.run_id = r.id
+        GROUP BY r.id ORDER BY r.started_at DESC LIMIT ?""", (limit,))
+
+def find_runs(prefix):
+    return query("SELECT * FROM runs WHERE id LIKE ? ORDER BY started_at DESC", (prefix + "%",))
+
+def get_steps(run_id):
+    return query("SELECT * FROM steps WHERE run_id = ? ORDER BY seq", (run_id,))
