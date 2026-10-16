@@ -227,7 +227,10 @@ def sweep(run_id: str = typer.Argument(..., help="Run to sweep."),
     table = Table(title=f"Sweep of step {step} ({run['id'][:8]})", show_lines=True)
     cols = ["variant", "runs", "ok"] + (["pass"] if expect else []) + ["avg tokens", "avg time", "sample output", "run ids"]
     for col in cols:
-        table.add_column(col)
+        if col == "sample output":
+            table.add_column(col, max_width=40, overflow="ellipsis", no_wrap=True)
+        else:
+            table.add_column(col, no_wrap=True)
     for label, rs in groups.items():
         n = len(rs)
         row = [label, str(n), f"{sum(r['status'] == 'ok' for r in rs)}/{n}"]
