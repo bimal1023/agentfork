@@ -6,16 +6,22 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY, name TEXT, started_at REAL, ended_at REAL,
   status TEXT, input_json TEXT, output_json TEXT,
-  parent_run_id TEXT, fork_step INTEGER
+  parent_run_id TEXT, fork_step INTEGER, entry_file TEXT, entry_name TEXT
 );
 CREATE TABLE IF NOT EXISTS steps (
   id TEXT PRIMARY KEY, run_id TEXT, parent_id TEXT, seq INTEGER,
   type TEXT, name TEXT, input_json TEXT, output_json TEXT,
   cache_key TEXT, tokens_in INTEGER, tokens_out INTEGER,
-  latency_ms REAL, error TEXT, started_at REAL
+  latency_ms REAL, error TEXT, started_at REAL, cached INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_steps_run ON steps(run_id, seq);
 """
+
+MIGRATIONS = [
+    "ALTER TABLE runs ADD COLUMN entry_file TEXT",
+    "ALTER TABLE runs ADD COLUMN entry_name TEXT",
+    "ALTER TABLE steps ADD COLUMN cached INTEGER DEFAULT 0",
+]
 
 def db_path():
     return Path(os.environ.get("AGENTREWIND_DIR", ".agentrewind")) / "traces.db"
@@ -25,6 +31,11 @@ def connect():
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.executescript(SCHEMA)
+    for sql in MIGRATIONS:
+        try:
+            conn.execute(sql)
+        except sqlite3.OperationalError:
+            pass
     return conn
 
 def _exec(sql, params):
