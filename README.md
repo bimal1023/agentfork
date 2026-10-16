@@ -2,13 +2,41 @@
 
 [![tests](https://github.com/bimal1023/agentfork/actions/workflows/tests.yml/badge.svg)](https://github.com/bimal1023/agentfork/actions/workflows/tests.yml)
 
-**Rewind, fork and replay your LLM agent runs, then turn them into regression tests.**
+**Fork your LLM agent at any step, then sweep prompts, models or tool results to find what actually fixes it.**
 
 ![agentfork demo](https://raw.githubusercontent.com/bimal1023/agentfork/main/docs/demo.gif)
 
-Debugging agents is painful: a bug shows up at step 7, and every attempt to fix it means re-running (and paying for) steps 1 to 6. agentfork records every LLM and tool call to a local SQLite file, lets you **fork any run from any step** with one change while earlier steps replay instantly from cache, and turns runs into **pytest snapshot tests** that run in CI with no API key.
+When an agent misbehaves at step 3, the usual loop is: tweak the prompt, re-run everything, eyeball one output, repeat. That is slow, costs tokens on steps that didn't change, and one lucky run proves nothing. agentfork records every LLM and tool call, replays earlier steps from cache, and runs **many variants of one step, several times each**, so you get pass rates instead of anecdotes.
 
 Everything runs locally. No account, no server, no data leaves your machine.
+
+## The headline example
+
+A refund agent reads `"amount": 4999, "currency": "USD"` from an order API. The amount is in cents, and the agent refunds **$4,999** for a $49.99 laptop ([examples/refund_agent_cents.py](examples/refund_agent_cents.py)). Is the fix a better model or a better prompt?
+
+```text
+$ agentfork sweep de994fe6 --step 3 --repeat 3 --expect "49.99" --model gpt-4o-mini,gpt-4o
+
+variant             runs  pass  avg tokens  sample output
+original            1     0/1   445         I have processed a refund of $4,999.00...
+model=gpt-4o-mini   3     0/3   444         I have processed a refund of $4,999.00...
+model=gpt-4o        3     0/3   292         I apologize, it seems there was a mis...
+```
+
+A bigger model doesn't fix it. One sentence in the prompt does:
+
+```text
+$ agentfork sweep de994fe6 --step 3 --repeat 3 --expect "49.99" \
+    --system "You are a support agent. Look up the order, then refund the full order amount in USD." \
+    --system "... Order amounts from the API are in cents; divide by 100 before refunding."
+
+variant      runs  pass  avg tokens  sample output
+original     1     0/1   445         I have processed a refund of $4,999.00...
+system #1    3     0/3   445         A full refund of $4,999.00 has ...
+system #2    3     3/3   460         I have processed a refund of $49.99...
+```
+
+Steps 1 and 2 replayed from cache in every run, so only the step that mattered was paid for.
 
 ## Quickstart
 
@@ -22,10 +50,10 @@ Add three things to your agent:
 from openai import OpenAI
 from agentfork import trace, tool, wrap_openai
 
-client = wrap_openai(OpenAI())      # records every LLM call
+client = wrap_openai(OpenAI())      # records every LLM call (wrap_anthropic for Claude)
 
 @tool                               # records every tool call
-def get_weather(city): ...
+def lookup_order(order_id): ...
 
 @trace                              # one run = one call of your agent
 def run_agent(question): ...
@@ -39,70 +67,30 @@ Run your agent as usual. Each run is saved to `.agentfork/traces.db`.
 | --- | --- |
 | `agentfork list` | Recent runs with steps, tokens, duration and fork lineage |
 | `agentfork show <id> [--full]` | A run as a step tree, with optional full JSON |
-| `agentfork fork <id> --step N --output "..."` | Replay with a fake result for tool step N |
-| `agentfork fork <id> --step N --model ...` | Replay with a different model at LLM step N |
-| `agentfork fork <id> --step N --system "..."` | Replay with a new system prompt at LLM step N |
+| `agentfork fork <id> --step N --output/--model/--system ...` | Re-run from step N with one change; earlier steps come from cache |
+| `agentfork sweep <id> --step N --model a,b --system ... --repeat K --expect TEXT` | Try many variants of step N, K times each, and compare pass rate, tokens and time |
 | `agentfork diff <a> <b>` | Compare two runs step by step |
-| `agentfork save-test <id>` | Save a run as a pytest test that replays from cache |
+| `agentfork save-test <id>` | Save a run as a pytest test that replays from cache in CI with no API key |
 
 ## How it works
 
-1. **Record.** `@trace`, `@tool` and `wrap_openai` capture each step's inputs, outputs, tokens and latency, plus a hash of its inputs.
-2. **Fork.** `fork` re-imports your agent and re-runs it. Steps before N come straight from the cache (free and identical), step N gets your change, and everything after runs live.
-3. **Test.** `save-test` writes a JSON snapshot and a pytest file. The test replays every step from cache and fails with a diff if any step's inputs, the number of steps, or the final output changes.
+1. **Record.** `@trace`, `@tool` and `wrap_openai`/`wrap_anthropic` capture each step's inputs, outputs, tokens and latency, plus a hash of its inputs.
+2. **Fork.** agentfork re-imports your agent and re-runs it. Steps before N are served from the cache, step N gets your change, and everything after runs live. A model change applies to every LLM call from step N on.
+3. **Sweep.** Runs fork for each variant `--repeat` times and checks each final output for your `--expect` text.
+4. **Test.** `save-test` writes a JSON snapshot plus a pytest file. The test replays every step from cache and fails with a diff if any step's inputs, the step count, or the final output changes.
 
-## Example
+## Related work
 
-```text
-$ agentfork fork f2628b01 --step 4 --system "Answer like a pirate in one sentence."
-run_agent 94bfdf0a ok 0.8s fork of f2628b01 at step 4
-├── #1 llm gpt-4o-mini 3ms (cached)  calls get_weather, calculator
-├── #2 tool get_weather 0ms (cached)  {'city': 'Kathmandu'} -> 22C, sunny
-├── #3 tool calculator 0ms (cached)  {'expression': '23*(4+5)'} -> 207
-└── #4 llm gpt-4o-mini 786ms 165->42 tok  Arrr, in Kathmandu it be a pleasant 22°C...
-```
-
-## Real bug walkthrough: the $4,999 refund
-
-A support agent looks up an order and refunds it ([examples/refund_agent.py](examples/refund_agent.py)). The order API returns `"amount": 4999, "currency": "USD"`. The amount is in **cents**, but nothing says so, and the agent refunds **$4,999.00** for a $49.99 laptop.
-
-**1. Find it.** `agentfork show 5a75d971` shows the lookup returning `4999` at step 2 and the refund of `4999` at step 4.
-
-**2. Test a fix without touching code.** Give step 2 the corrected data and let the rest run live:
-
-```bash
-agentfork fork 5a75d971 --step 2 --output '{"order_id": "A123", "item": "laptop", "amount_usd": 49.99, "status": "delivered"}'
-```
-
-Step 1 replays from cache (4 ms, no tokens), and the agent now refunds **$49.99**.
-
-**3. See exactly what changed.** `agentfork diff 5a75d971 ebb96ab1`:
-
-```text
-#     original (5a75d971)                     fork (ebb96ab1)
-1     llm   calls lookup_order                llm   calls lookup_order (cached)
-2 *   tool  lookup_order -> "amount": 4999    tool  lookup_order -> "amount_usd": 49.99
-3     llm   calls issue_refund                llm   calls issue_refund
-4 *   tool  issue_refund -> $4,999.00         tool  issue_refund -> $49.99
-5 *   llm   "processed a full refund of       llm   "processed a refund of $49.99..."
-            $4,999.00..."
-```
-
-**4. Fix it and lock it in.** Return `amount_usd` from the tool, re-run the agent, and save the good run as a test:
-
-```bash
-agentfork save-test <good-run-id>
-```
-
-The test replays the run from cache in CI. If anyone changes the order format, prompt or tools again, it fails and shows a diff of exactly what changed.
+agentfork overlaps with record/replay tools like [agent-rewind](https://pypi.org/project/agent-rewind/), which supports many more providers, and [agentstep](https://pypi.org/project/agentstep/), a LangGraph time-travel debugger with a web UI. agentfork's focus is the step after replay: sweeping many variants of one step, with repeats and pass rates, to choose a fix with evidence.
 
 ## Roadmap
 
-- [x] Recorder, CLI viewer, fork and replay, diff, snapshot tests
-- [ ] Anthropic SDK support
+- [x] Recorder, CLI viewer, fork, diff, snapshot tests
+- [x] OpenAI and Anthropic support
+- [x] Sweep with repeats and pass rates
+- [ ] Cost estimates per variant
+- [ ] Parallel sweeps
 - [ ] LangGraph integration
-- [ ] Web timeline UI
-- [x] PyPI release
 
 ## License
 

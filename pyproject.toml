@@ -1,7 +1,7 @@
 [project]
 name = "agentfork"
 version = "0.1.0"
-description = "Rewind, fork and replay LLM agent runs, then turn them into regression tests."
+description = "Fork your LLM agent at any step and sweep prompts, models or tool results to find what fixes it."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"

@@ -1,29 +1,22 @@
 Output docs/demo.gif
-Set FontSize 15
-Set Width 1300
-Set Height 800
+Set FontSize 14
+Set Width 1500
+Set Height 850
 Set Padding 20
 Set Theme "Catppuccin Mocha"
-Set TypingSpeed 35ms
+Set TypingSpeed 30ms
 
 Hide
 Type "source .venv/bin/activate && clear"
 Enter
 Show
 
-Type "# The agent refunded $4,999 for a $49.99 laptop. What happened?"
+Type "# Our refund agent paid $4,999 for a $49.99 laptop. Better model or better prompt?"
 Enter
 Sleep 1s
-Type "agentfork show 5a75d971"
+Type `agentfork sweep de994fe6 --step 3 --repeat 2 --expect "49.99" --model gpt-4o-mini,gpt-4o`
 Enter
-Sleep 4s
-
-Type "# Test a fix: feed step 2 the right data, replay step 1 from cache"
+Sleep 14s
+Type `agentfork sweep de994fe6 --step 3 --repeat 2 --expect "49.99" --system "You are a support agent. Look up the order, then refund the full order amount in USD." --system "You are a support agent. Look up the order, then refund the full order amount in USD. Order amounts from the API are in cents; divide by 100 before refunding."`
 Enter
-Type `agentfork fork 5a75d971 --step 2 --output '{"order_id": "A123", "item": "laptop", "amount_usd": 49.99, "status": "delivered"}'`
-Enter
-Sleep 7s
-
-Type "agentfork diff 5a75d971 ebb96ab1"
-Enter
-Sleep 6s
+Sleep 14s
