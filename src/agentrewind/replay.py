@@ -40,3 +40,22 @@ def fork(run, step, output=None, model=None, system=None):
     finally:
         recorder._replay.reset(token)
     return recorder.last_run_id, result
+
+def check(fixture, root="."):
+    run = fixture["run"]
+    steps = {s["seq"]: s for s in fixture["steps"]}
+    fn = load_entry(dict(run, entry_file=str(Path(root) / run["entry_file"])))
+    inputs = json.loads(run["input_json"])
+    token = recorder._replay.set({"parent_run_id": None, "fork_step": float("inf"),
+                                  "steps": steps, "override": {}, "strict": True})
+    try:
+        result = fn(*inputs["args"], **inputs["kwargs"])
+    finally:
+        recorder._replay.reset(token)
+    if recorder.last_run_seq != max(steps, default=0):
+        raise recorder.ReplayMismatch(
+            f"the recorded run had {max(steps, default=0)} steps but the replay made {recorder.last_run_seq}")
+    expected = json.loads(run["output_json"])
+    if recorder.to_jsonable(result) != expected:
+        raise recorder.ReplayMismatch(f"final output changed\n  recorded: {expected!r}\n  now:      {result!r}")
+    return result

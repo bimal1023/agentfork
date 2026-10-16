@@ -1,4 +1,4 @@
-import contextvars, functools, hashlib, inspect, json, time, uuid, warnings
+import contextvars, difflib, functools, hashlib, inspect, json, time, uuid, warnings
 from . import store
 
 _run_id = contextvars.ContextVar("run_id", default=None)
@@ -8,6 +8,10 @@ _replay = contextvars.ContextVar("replay", default=None)
 
 DECODERS = {}
 last_run_id = None
+last_run_seq = 0
+
+class ReplayMismatch(AssertionError):
+    """The agent did something different from the recorded run."""
 
 def to_jsonable(obj):
     if hasattr(obj, "model_dump"):
@@ -45,6 +49,15 @@ def _last_descendant_seq(steps, step):
             last = s["seq"]
     return last
 
+def _explain_mismatch(seq, step_type, name, cached_step, input_json):
+    if cached_step["type"] != step_type or cached_step["name"] != name:
+        return (f"step {seq} was {cached_step['type']} {cached_step['name']} in the recording "
+                f"but is now {step_type} {name}")
+    old = json.dumps(json.loads(cached_step["input_json"]), indent=2, sort_keys=True).splitlines()
+    new = json.dumps(json.loads(input_json), indent=2, sort_keys=True).splitlines()
+    diff = list(difflib.unified_diff(old, new, "recorded", "now", lineterm="", n=1))[:40]
+    return f"step {seq} ({step_type} {name}) got different inputs than the recorded run\n" + "\n".join(diff)
+
 def record_step(step_type, name, fn, args, kwargs):
     run_id = _run_id.get()
     if run_id is None:
@@ -53,9 +66,13 @@ def record_step(step_type, name, fn, args, kwargs):
     counter[0] += 1
     seq = counter[0]
     replay = _replay.get()
+    strict = bool(replay and replay.get("strict"))
     cached_step, use_forced = None, False
     if replay and seq < replay["fork_step"]:
         cached_step = replay["steps"].get(seq)
+        if strict and cached_step is None:
+            raise ReplayMismatch(f"step {seq} ({step_type} {name}) is new: "
+                                 f"the recorded run only had {len(replay['steps'])} steps")
     elif replay and seq == replay["fork_step"]:
         if "output" in replay["override"]:
             use_forced = True
@@ -63,14 +80,16 @@ def record_step(step_type, name, fn, args, kwargs):
             kwargs = _apply_override(step_type, kwargs, replay["override"])
     input_json = dumps({"args": args, "kwargs": kwargs})
     key = make_cache_key(step_type, name, input_json)
+    if cached_step is not None and cached_step["cache_key"] != key:
+        if strict:
+            raise ReplayMismatch(_explain_mismatch(seq, step_type, name, cached_step, input_json))
+        warnings.warn(f"agentrewind: step {seq} inputs differ from the original run; reusing its cached output")
     step_id, parent = uuid.uuid4().hex, _parent_step.get()
     token = _parent_step.set(step_id)
     started = time.time()
     output, error, cached = None, None, 0
     try:
         if cached_step is not None:
-            if cached_step["cache_key"] != key:
-                warnings.warn(f"agentrewind: step {seq} inputs differ from the original run; reusing its cached output")
             decode = DECODERS.get(step_type, lambda x: x)
             output = decode(json.loads(cached_step["output_json"]))
             counter[0] = _last_descendant_seq(replay["steps"], cached_step)
@@ -105,16 +124,17 @@ def trace(fn=None, *, name=None):
 
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
-            global last_run_id
+            global last_run_id, last_run_seq
             if _run_id.get() is not None:
                 return f(*args, **kwargs)
             run_id = uuid.uuid4().hex
             replay = _replay.get() or {}
+            parent_run = replay.get("parent_run_id")
             store.insert("runs", {
                 "id": run_id, "name": name or f.__name__, "started_at": time.time(),
                 "status": "running", "input_json": dumps({"args": args, "kwargs": kwargs}),
                 "entry_file": entry_file, "entry_name": f.__qualname__,
-                "parent_run_id": replay.get("parent_run_id"), "fork_step": replay.get("fork_step"),
+                "parent_run_id": parent_run, "fork_step": replay.get("fork_step") if parent_run else None,
             })
             last_run_id = run_id
             t_run, t_seq, t_parent = _run_id.set(run_id), _seq.set([0]), _parent_step.set(None)
@@ -124,6 +144,7 @@ def trace(fn=None, *, name=None):
                 status = "ok"
                 return output
             finally:
+                last_run_seq = _seq.get()[0]
                 _run_id.reset(t_run); _seq.reset(t_seq); _parent_step.reset(t_parent)
                 store.update_run(run_id, ended_at=time.time(), status=status, output_json=dumps(output))
                 print(f"[agentrewind] saved run {run_id[:8]} ({status})")
