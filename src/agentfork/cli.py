@@ -184,12 +184,16 @@ def save_test(run_id: str = typer.Argument(..., help="Run to turn into a test.")
     console.print(f"[dim]Run it with: pytest {test_path}[/dim]")
 
 
-def _variant_label(v):
-    if v.get("original"):
-        return "original"
-    key, value = next(iter(v.items()))
-    value = str(value)
-    return f"{key}={value if len(value) <= 40 else value[:37] + '...'}"
+def _make_labels(variants):
+    labels, counts = {}, {}
+    for v in variants:
+        key, value = next(iter(v.items()))
+        if key == "model":
+            labels[id(v)] = f"model={value}"
+        else:
+            counts[key] = counts.get(key, 0) + 1
+            labels[id(v)] = f"{key} #{counts[key]}"
+    return labels
 
 @app.command()
 def sweep(run_id: str = typer.Argument(..., help="Run to sweep."),
@@ -207,13 +211,14 @@ def sweep(run_id: str = typer.Argument(..., help="Run to sweep."),
         console.print("[red]Give at least one variant: --model, --system or --output[/red]")
         raise typer.Exit(1)
     run = _resolve(run_id)
+    labels = _make_labels(variants)
     console.print(f"[bold]Sweeping step {step} of {run['id'][:8]}: "
                   f"{len(variants)} variants x {repeat} = {len(variants) * repeat} runs[/bold]")
 
     def progress(r):
         mark = "[green]ok[/green]" if r["status"] == "ok" else "[red]error[/red]"
         verdict = "" if r["passed"] is None else (" [green]pass[/green]" if r["passed"] else " [red]fail[/red]")
-        console.print(f"  {mark}{verdict} {_variant_label(r['variant'])} [dim]{r['tokens']} tok[/dim]")
+        console.print(f"  {mark}{verdict} {labels[id(r['variant'])]} [dim]{r['tokens']} tok[/dim]")
 
     try:
         results = replay.sweep(run, step, variants, repeat=repeat, expect=expect, on_result=progress)
@@ -221,18 +226,22 @@ def sweep(run_id: str = typer.Argument(..., help="Run to sweep."),
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1)
 
-    groups = {}
-    for r in [replay.baseline(run, step, expect)] + results:
-        groups.setdefault(_variant_label(r["variant"]), []).append(r)
+    groups = {"original": [replay.baseline(run, step, expect)]}
+    for r in results:
+        groups.setdefault(labels[id(r["variant"])], []).append(r)
     table = Table(title=f"Sweep of step {step} ({run['id'][:8]})", show_lines=True)
-    cols = ["variant", "runs", "ok"] + (["pass"] if expect else []) + ["avg tokens", "avg time", "sample output", "run ids"]
-    for col in cols:
-        if col == "sample output":
-            table.add_column(col, max_width=40, overflow="ellipsis", no_wrap=True)
-        else:
-            table.add_column(col, no_wrap=True)
+    table.add_column("variant", no_wrap=True)
+    table.add_column("runs", no_wrap=True, min_width=4)
+    table.add_column("ok", no_wrap=True, min_width=3)
+    if expect:
+        table.add_column("pass", no_wrap=True, min_width=4)
+    table.add_column("avg tokens", no_wrap=True, min_width=6)
+    table.add_column("avg time", no_wrap=True, min_width=6)
+    table.add_column("sample output", max_width=36, overflow="ellipsis", no_wrap=True)
+    table.add_column("run ids", no_wrap=True)
     for label, rs in groups.items():
         n = len(rs)
+        ids = [(r["run_id"] or "-")[:8] for r in rs]
         row = [label, str(n), f"{sum(r['status'] == 'ok' for r in rs)}/{n}"]
         if expect:
             passed = sum(bool(r["passed"]) for r in rs)
@@ -240,7 +249,11 @@ def sweep(run_id: str = typer.Argument(..., help="Run to sweep."),
             row.append(f"[{color}]{passed}/{n}[/{color}]")
         row += [f"{sum(r['tokens'] for r in rs) / n:.0f}",
                 f"{sum(r['latency_ms'] for r in rs) / n / 1000:.1f}s",
-                str(rs[0]["result"])[:80],
-                ", ".join((r["run_id"] or "-")[:8] for r in rs)]
+                str(rs[0]["result"]),
+                ", ".join(ids[:2]) + (f" +{len(ids) - 2}" if len(ids) > 2 else "")]
         table.add_row(*row)
     console.print(table)
+    for v in variants:
+        key, value = next(iter(v.items()))
+        if key != "model":
+            console.print(f"[bold]{labels[id(v)]}[/bold]: {value}")
