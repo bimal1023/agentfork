@@ -4,6 +4,8 @@
 
 **Rewind, fork and replay your LLM agent runs, then turn them into regression tests.**
 
+![agentrewind demo](docs/demo.gif)
+
 Debugging agents is painful: a bug shows up at step 7, and every attempt to fix it means re-running (and paying for) steps 1 to 6. agentrewind records every LLM and tool call to a local SQLite file, lets you **fork any run from any step** with one change while earlier steps replay instantly from cache, and turns runs into **pytest snapshot tests** that run in CI with no API key.
 
 Everything runs locally. No account, no server, no data leaves your machine.
