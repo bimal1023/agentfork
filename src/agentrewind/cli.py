@@ -33,11 +33,17 @@ def _summarize(step):
         args = inp.get("kwargs") or inp.get("args")
         return f"{args} -> {out}"
     if step["type"] == "llm" and isinstance(out, dict):
-        msg = (out.get("choices") or [{}])[0].get("message") or {}
-        calls = msg.get("tool_calls") or []
-        if calls:
-            return "calls " + ", ".join(c["function"]["name"] for c in calls)
-        return (msg.get("content") or "")[:120]
+        if "choices" in out:
+            msg = (out.get("choices") or [{}])[0].get("message") or {}
+            calls = msg.get("tool_calls") or []
+            if calls:
+                return "calls " + ", ".join(c["function"]["name"] for c in calls)
+            return (msg.get("content") or "")[:120]
+        blocks = [b for b in (out.get("content") or []) if isinstance(b, dict)]
+        tools = [b.get("name") for b in blocks if b.get("type") == "tool_use"]
+        if tools:
+            return "calls " + ", ".join(tools)
+        return " ".join(b.get("text", "") for b in blocks if b.get("type") == "text")[:120]
     return str(out)[:120]
 
 def _label(s):

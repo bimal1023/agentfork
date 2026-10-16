@@ -2,10 +2,12 @@
 name = "agentrewind"
 version = "0.0.1"
 requires-python = ">=3.9"
-dependencies = ["openai", "typer", "rich"]
+dependencies = ["typer", "rich"]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+openai = ["openai"]
+anthropic = ["anthropic"]
+dev = ["pytest", "openai", "anthropic"]
 
 [project.scripts]
 agentrewind = "agentrewind.cli:app"
