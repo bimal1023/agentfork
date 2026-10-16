@@ -1,6 +1,6 @@
 import json
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 import typer
 from rich.console import Console
@@ -182,3 +182,62 @@ def save_test(run_id: str = typer.Argument(..., help="Run to turn into a test.")
     test_path.write_text(TEST_TEMPLATE.format(run_id=run["id"], short=short, depth=depth))
     console.print(f"[green]Saved {test_path} and {fixture_path.name}[/green]")
     console.print(f"[dim]Run it with: pytest {test_path}[/dim]")
+
+
+def _variant_label(v):
+    if v.get("original"):
+        return "original"
+    key, value = next(iter(v.items()))
+    value = str(value)
+    return f"{key}={value if len(value) <= 40 else value[:37] + '...'}"
+
+@app.command()
+def sweep(run_id: str = typer.Argument(..., help="Run to sweep."),
+          step: int = typer.Option(..., "--step", help="Step to vary (see `show`)."),
+          model: Optional[str] = typer.Option(None, "--model", help="Comma-separated models to try."),
+          system: Optional[List[str]] = typer.Option(None, "--system", help="System prompt to try; repeat for more."),
+          output: Optional[List[str]] = typer.Option(None, "--output", help="Tool result to try; repeat for more."),
+          repeat: int = typer.Option(1, "--repeat", help="Runs per variant (LLMs vary run to run)."),
+          expect: Optional[str] = typer.Option(None, "--expect", help="Text a good final output contains.")):
+    """Fork one step across several models, prompts or tool results and compare outcomes."""
+    variants = [{"model": m.strip()} for m in (model or "").split(",") if m.strip()]
+    variants += [{"system": s} for s in (system or [])]
+    variants += [{"output": o} for o in (output or [])]
+    if not variants:
+        console.print("[red]Give at least one variant: --model, --system or --output[/red]")
+        raise typer.Exit(1)
+    run = _resolve(run_id)
+    console.print(f"[bold]Sweeping step {step} of {run['id'][:8]}: "
+                  f"{len(variants)} variants x {repeat} = {len(variants) * repeat} runs[/bold]")
+
+    def progress(r):
+        mark = "[green]ok[/green]" if r["status"] == "ok" else "[red]error[/red]"
+        verdict = "" if r["passed"] is None else (" [green]pass[/green]" if r["passed"] else " [red]fail[/red]")
+        console.print(f"  {mark}{verdict} {_variant_label(r['variant'])} [dim]{r['tokens']} tok[/dim]")
+
+    try:
+        results = replay.sweep(run, step, variants, repeat=repeat, expect=expect, on_result=progress)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+
+    groups = {}
+    for r in [replay.baseline(run, step, expect)] + results:
+        groups.setdefault(_variant_label(r["variant"]), []).append(r)
+    table = Table(title=f"Sweep of step {step} ({run['id'][:8]})", show_lines=True)
+    cols = ["variant", "runs", "ok"] + (["pass"] if expect else []) + ["avg tokens", "avg time", "sample output", "run ids"]
+    for col in cols:
+        table.add_column(col)
+    for label, rs in groups.items():
+        n = len(rs)
+        row = [label, str(n), f"{sum(r['status'] == 'ok' for r in rs)}/{n}"]
+        if expect:
+            passed = sum(bool(r["passed"]) for r in rs)
+            color = "green" if passed == n else ("yellow" if passed else "red")
+            row.append(f"[{color}]{passed}/{n}[/{color}]")
+        row += [f"{sum(r['tokens'] for r in rs) / n:.0f}",
+                f"{sum(r['latency_ms'] for r in rs) / n / 1000:.1f}s",
+                str(rs[0]["result"])[:80],
+                ", ".join((r["run_id"] or "-")[:8] for r in rs)]
+        table.add_row(*row)
+    console.print(table)

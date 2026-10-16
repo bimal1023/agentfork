@@ -98,6 +98,11 @@ def record_step(step_type, name, fn, args, kwargs, provider=None):
             use_forced = True
         else:
             kwargs = _apply_override(step_type, kwargs, replay["override"], provider)
+    if (replay and not strict and seq > replay["fork_step"] and step_type == "llm"
+            and replay["override"].get("model")):
+        kwargs = dict(kwargs, model=replay["override"]["model"])
+    if step_type == "llm" and kwargs.get("model") and cached_step is None:
+        name = kwargs["model"]
     input_json = dumps({"args": args, "kwargs": kwargs})
     key = make_cache_key(step_type, name, input_json)
     if cached_step is not None and cached_step["cache_key"] != key:
