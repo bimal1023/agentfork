@@ -41,7 +41,7 @@ Steps 1 and 2 replayed from cache in every run, so only the step that mattered w
 ## Quickstart
 
 ```bash
-pip install "agentfork[openai]"      # or agentfork[anthropic]
+pip install "agentfork-cli[openai]"      # or agentfork[anthropic]
 ```
 
 Add three things to your agent:

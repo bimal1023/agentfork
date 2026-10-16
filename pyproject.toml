@@ -1,5 +1,5 @@
 [project]
-name = "agentfork"
+name = "agentfork-cli"
 version = "0.1.0"
 description = "Fork your LLM agent at any step and sweep prompts, models or tool results to find what fixes it."
 readme = "README.md"
@@ -34,3 +34,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.sdist]
 exclude = ["docs/", ".github/", "tests/agentfork/"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentfork"]
