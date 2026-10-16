@@ -1,15 +1,15 @@
 import sqlite3
-import agentrewind
-from agentrewind import store
+import agentfork
+from agentfork import store
 
 def test_records_tool_steps(tmp_path, monkeypatch):
-    monkeypatch.setenv("AGENTREWIND_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENTFORK_DIR", str(tmp_path))
 
-    @agentrewind.tool
+    @agentfork.tool
     def add(a, b):
         return a + b
 
-    @agentrewind.trace
+    @agentfork.trace
     def agent():
         return add(2, 3) + add(1, 1)
 

@@ -1,7 +1,19 @@
 [project]
-name = "agentrewind"
-version = "0.0.1"
+name = "agentfork"
+version = "0.1.0"
+description = "Rewind, fork and replay LLM agent runs, then turn them into regression tests."
+readme = "README.md"
 requires-python = ">=3.9"
+license = "MIT"
+authors = [{ name = "Bimal Kumal" }]
+keywords = ["llm", "agents", "debugging", "replay", "testing", "openai", "anthropic"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Debuggers",
+    "Topic :: Software Development :: Testing",
+]
 dependencies = ["typer", "rich"]
 
 [project.optional-dependencies]
@@ -9,9 +21,16 @@ openai = ["openai"]
 anthropic = ["anthropic"]
 dev = ["pytest", "openai", "anthropic"]
 
+[project.urls]
+Homepage = "https://github.com/bimal1023/agentfork"
+Issues = "https://github.com/bimal1023/agentfork/issues"
+
 [project.scripts]
-agentrewind = "agentrewind.cli:app"
+agentfork = "agentfork.cli:app"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.sdist]
+exclude = ["docs/", ".github/", "tests/agentfork/"]

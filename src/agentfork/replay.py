@@ -9,7 +9,7 @@ def load_entry(run):
     folder = str(Path(path).parent)
     if folder not in sys.path:
         sys.path.insert(0, folder)
-    spec = importlib.util.spec_from_file_location("agentrewind_entry", path)
+    spec = importlib.util.spec_from_file_location("agentfork_entry", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     obj = module

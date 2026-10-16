@@ -1,6 +1,6 @@
 import json
 from openai import OpenAI
-from agentrewind import trace, tool, wrap_openai
+from agentfork import trace, tool, wrap_openai
 
 client = wrap_openai(OpenAI())
 MODEL = "gpt-4o-mini"

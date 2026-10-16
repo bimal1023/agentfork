@@ -1,6 +1,6 @@
 import re
 import anthropic
-from agentrewind import trace, tool, wrap_anthropic
+from agentfork import trace, tool, wrap_anthropic
 
 client = wrap_anthropic(anthropic.Anthropic())
 MODEL = "claude-haiku-5-5"

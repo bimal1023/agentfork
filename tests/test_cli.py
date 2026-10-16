@@ -1,16 +1,16 @@
 from typer.testing import CliRunner
-import agentrewind
-from agentrewind import store
-from agentrewind.cli import app
+import agentfork
+from agentfork import store
+from agentfork.cli import app
 
 def test_list_and_show(tmp_path, monkeypatch):
-    monkeypatch.setenv("AGENTREWIND_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENTFORK_DIR", str(tmp_path))
 
-    @agentrewind.tool
+    @agentfork.tool
     def add(a, b):
         return a + b
 
-    @agentrewind.trace
+    @agentfork.trace
     def agent():
         return add(2, 3)
 

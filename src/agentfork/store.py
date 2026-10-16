@@ -24,7 +24,7 @@ MIGRATIONS = [
 ]
 
 def db_path():
-    return Path(os.environ.get("AGENTREWIND_DIR", ".agentrewind")) / "traces.db"
+    return Path(os.environ.get("AGENTFORK_DIR", ".agentfork")) / "traces.db"
 
 def connect():
     path = db_path()

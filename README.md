@@ -1,26 +1,26 @@
-# agentrewind
+# agentfork
 
-[![tests](https://github.com/bimal1023/agentrewind/actions/workflows/tests.yml/badge.svg)](https://github.com/bimal1023/agentrewind/actions/workflows/tests.yml)
+[![tests](https://github.com/bimal1023/agentfork/actions/workflows/tests.yml/badge.svg)](https://github.com/bimal1023/agentfork/actions/workflows/tests.yml)
 
 **Rewind, fork and replay your LLM agent runs, then turn them into regression tests.**
 
-![agentrewind demo](docs/demo.gif)
+![agentfork demo](https://raw.githubusercontent.com/bimal1023/agentfork/main/docs/demo.gif)
 
-Debugging agents is painful: a bug shows up at step 7, and every attempt to fix it means re-running (and paying for) steps 1 to 6. agentrewind records every LLM and tool call to a local SQLite file, lets you **fork any run from any step** with one change while earlier steps replay instantly from cache, and turns runs into **pytest snapshot tests** that run in CI with no API key.
+Debugging agents is painful: a bug shows up at step 7, and every attempt to fix it means re-running (and paying for) steps 1 to 6. agentfork records every LLM and tool call to a local SQLite file, lets you **fork any run from any step** with one change while earlier steps replay instantly from cache, and turns runs into **pytest snapshot tests** that run in CI with no API key.
 
 Everything runs locally. No account, no server, no data leaves your machine.
 
 ## Quickstart
 
 ```bash
-pip install -e .   # PyPI release coming soon
+pip install "agentfork[openai]"      # or agentfork[anthropic]
 ```
 
 Add three things to your agent:
 
 ```python
 from openai import OpenAI
-from agentrewind import trace, tool, wrap_openai
+from agentfork import trace, tool, wrap_openai
 
 client = wrap_openai(OpenAI())      # records every LLM call
 
@@ -31,19 +31,19 @@ def get_weather(city): ...
 def run_agent(question): ...
 ```
 
-Run your agent as usual. Each run is saved to `.agentrewind/traces.db`.
+Run your agent as usual. Each run is saved to `.agentfork/traces.db`.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `agentrewind list` | Recent runs with steps, tokens, duration and fork lineage |
-| `agentrewind show <id> [--full]` | A run as a step tree, with optional full JSON |
-| `agentrewind fork <id> --step N --output "..."` | Replay with a fake result for tool step N |
-| `agentrewind fork <id> --step N --model ...` | Replay with a different model at LLM step N |
-| `agentrewind fork <id> --step N --system "..."` | Replay with a new system prompt at LLM step N |
-| `agentrewind diff <a> <b>` | Compare two runs step by step |
-| `agentrewind save-test <id>` | Save a run as a pytest test that replays from cache |
+| `agentfork list` | Recent runs with steps, tokens, duration and fork lineage |
+| `agentfork show <id> [--full]` | A run as a step tree, with optional full JSON |
+| `agentfork fork <id> --step N --output "..."` | Replay with a fake result for tool step N |
+| `agentfork fork <id> --step N --model ...` | Replay with a different model at LLM step N |
+| `agentfork fork <id> --step N --system "..."` | Replay with a new system prompt at LLM step N |
+| `agentfork diff <a> <b>` | Compare two runs step by step |
+| `agentfork save-test <id>` | Save a run as a pytest test that replays from cache |
 
 ## How it works
 
@@ -54,7 +54,7 @@ Run your agent as usual. Each run is saved to `.agentrewind/traces.db`.
 ## Example
 
 ```text
-$ agentrewind fork f2628b01 --step 4 --system "Answer like a pirate in one sentence."
+$ agentfork fork f2628b01 --step 4 --system "Answer like a pirate in one sentence."
 run_agent 94bfdf0a ok 0.8s fork of f2628b01 at step 4
 ├── #1 llm gpt-4o-mini 3ms (cached)  calls get_weather, calculator
 ├── #2 tool get_weather 0ms (cached)  {'city': 'Kathmandu'} -> 22C, sunny
@@ -66,17 +66,17 @@ run_agent 94bfdf0a ok 0.8s fork of f2628b01 at step 4
 
 A support agent looks up an order and refunds it ([examples/refund_agent.py](examples/refund_agent.py)). The order API returns `"amount": 4999, "currency": "USD"`. The amount is in **cents**, but nothing says so, and the agent refunds **$4,999.00** for a $49.99 laptop.
 
-**1. Find it.** `agentrewind show 5a75d971` shows the lookup returning `4999` at step 2 and the refund of `4999` at step 4.
+**1. Find it.** `agentfork show 5a75d971` shows the lookup returning `4999` at step 2 and the refund of `4999` at step 4.
 
 **2. Test a fix without touching code.** Give step 2 the corrected data and let the rest run live:
 
 ```bash
-agentrewind fork 5a75d971 --step 2 --output '{"order_id": "A123", "item": "laptop", "amount_usd": 49.99, "status": "delivered"}'
+agentfork fork 5a75d971 --step 2 --output '{"order_id": "A123", "item": "laptop", "amount_usd": 49.99, "status": "delivered"}'
 ```
 
 Step 1 replays from cache (4 ms, no tokens), and the agent now refunds **$49.99**.
 
-**3. See exactly what changed.** `agentrewind diff 5a75d971 ebb96ab1`:
+**3. See exactly what changed.** `agentfork diff 5a75d971 ebb96ab1`:
 
 ```text
 #     original (5a75d971)                     fork (ebb96ab1)
@@ -91,7 +91,7 @@ Step 1 replays from cache (4 ms, no tokens), and the agent now refunds **$49.99*
 **4. Fix it and lock it in.** Return `amount_usd` from the tool, re-run the agent, and save the good run as a test:
 
 ```bash
-agentrewind save-test <good-run-id>
+agentfork save-test <good-run-id>
 ```
 
 The test replays the run from cache in CI. If anyone changes the order format, prompt or tools again, it fails and shows a diff of exactly what changed.
@@ -102,7 +102,7 @@ The test replays the run from cache in CI. If anyone changes the order format, p
 - [ ] Anthropic SDK support
 - [ ] LangGraph integration
 - [ ] Web timeline UI
-- [ ] PyPI release
+- [x] PyPI release
 
 ## License
 

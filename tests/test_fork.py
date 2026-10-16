@@ -1,19 +1,19 @@
-from agentrewind import replay, store
+from agentfork import replay, store
 
 AGENT = '''
-import agentrewind
+import agentfork
 
-@agentrewind.tool
+@agentfork.tool
 def lookup(city):
     return {"kathmandu": "sunny", "paris": "cloudy"}.get(city, "unknown")
 
-@agentrewind.trace
+@agentfork.trace
 def agent(city):
     return f"{city}: {lookup(city)}, paris: {lookup('paris')}"
 '''
 
 def test_fork_reuses_cache_and_overrides(tmp_path, monkeypatch):
-    monkeypatch.setenv("AGENTREWIND_DIR", str(tmp_path / "db"))
+    monkeypatch.setenv("AGENTFORK_DIR", str(tmp_path / "db"))
     path = tmp_path / "toy_agent.py"
     path.write_text(AGENT)
     agent = replay.load_entry({"entry_file": str(path), "entry_name": "agent"})

@@ -1,24 +1,24 @@
 import pytest
 from typer.testing import CliRunner
 
-from agentrewind import replay, store
-from agentrewind.cli import app
-from agentrewind.recorder import ReplayMismatch
+from agentfork import replay, store
+from agentfork.cli import app
+from agentfork.recorder import ReplayMismatch
 
 AGENT = '''
-import agentrewind
+import agentfork
 
-@agentrewind.tool
+@agentfork.tool
 def lookup(city):
     return {"kathmandu": "sunny", "paris": "cloudy"}.get(city, "unknown")
 
-@agentrewind.trace
+@agentfork.trace
 def agent(city):
     return f"{city}: {lookup(city)}, paris: {lookup('paris')}"
 '''
 
 def _record(tmp_path, monkeypatch, source):
-    monkeypatch.setenv("AGENTREWIND_DIR", str(tmp_path / "db"))
+    monkeypatch.setenv("AGENTFORK_DIR", str(tmp_path / "db"))
     path = tmp_path / "toy_agent.py"
     path.write_text(source)
     replay.load_entry({"entry_file": str(path), "entry_name": "agent"})("kathmandu")

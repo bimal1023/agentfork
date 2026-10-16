@@ -1,7 +1,7 @@
-from agentrewind import replay, store
+from agentfork import replay, store
 
 AGENT = '''
-import agentrewind
+import agentfork
 from anthropic.types import Message, TextBlock, Usage
 
 class _Messages:
@@ -15,9 +15,9 @@ class FakeAnthropic:
     def __init__(self):
         self.messages = _Messages()
 
-client = agentrewind.wrap_anthropic(FakeAnthropic())
+client = agentfork.wrap_anthropic(FakeAnthropic())
 
-@agentrewind.trace
+@agentfork.trace
 def agent(question):
     resp = client.messages.create(model="claude-haiku-5-5", max_tokens=100,
                                   messages=[{"role": "user", "content": question}])
@@ -25,7 +25,7 @@ def agent(question):
 '''
 
 def test_anthropic_record_fork_and_check(tmp_path, monkeypatch):
-    monkeypatch.setenv("AGENTREWIND_DIR", str(tmp_path / "db"))
+    monkeypatch.setenv("AGENTFORK_DIR", str(tmp_path / "db"))
     path = tmp_path / "claude_agent.py"
     path.write_text(AGENT)
     agent = replay.load_entry({"entry_file": str(path), "entry_name": "agent"})

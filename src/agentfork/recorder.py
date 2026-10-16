@@ -103,7 +103,7 @@ def record_step(step_type, name, fn, args, kwargs, provider=None):
     if cached_step is not None and cached_step["cache_key"] != key:
         if strict:
             raise ReplayMismatch(_explain_mismatch(seq, step_type, name, cached_step, input_json))
-        warnings.warn(f"agentrewind: step {seq} inputs differ from the original run; reusing its cached output")
+        warnings.warn(f"agentfork: step {seq} inputs differ from the original run; reusing its cached output")
     step_id, parent = uuid.uuid4().hex, _parent_step.get()
     token = _parent_step.set(step_id)
     started = time.time()
@@ -167,7 +167,7 @@ def trace(fn=None, *, name=None):
                 last_run_seq = _seq.get()[0]
                 _run_id.reset(t_run); _seq.reset(t_seq); _parent_step.reset(t_parent)
                 store.update_run(run_id, ended_at=time.time(), status=status, output_json=dumps(output))
-                print(f"[agentrewind] saved run {run_id[:8]} ({status})")
+                print(f"[agentfork] saved run {run_id[:8]} ({status})")
         return wrapper
     return deco(fn) if fn else deco
 
