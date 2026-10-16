@@ -1,7 +1,7 @@
 import json, re
 from openai import OpenAI
-
-client = OpenAI()
+from agentrewind import trace, tool, wrap_openai
+client = wrap_openai(OpenAI())
 MODEL = "gpt-4o-mini"
 
 TOOLS = [
@@ -18,18 +18,18 @@ TOOLS = [
                        "properties": {"city": {"type": "string"}},
                        "required": ["city"]}}},
 ]
-
+@tool
 def calculator(expression):
     if not re.fullmatch(r"[\d\s+\-*/().]+", expression):
         return "error: invalid expression"
     return str(eval(expression))
-
+@tool
 def get_weather(city):
     fake = {"new york": "18C, cloudy", "kathmandu": "22C, sunny"}
     return fake.get(city.lower(), "15C, clear")
 
 TOOL_FUNCS = {"calculator": calculator, "get_weather": get_weather}
-
+@trace
 def run_agent(question, max_turns=5):
     messages = [{"role": "user", "content": question}]
     for _ in range(max_turns):
