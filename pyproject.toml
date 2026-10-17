@@ -1,6 +1,6 @@
 [project]
 name = "agentfork-cli"
-version = "0.2.0"
+version = "0.3.0"
 description = "Fork your LLM agent at any step and sweep prompts, models or tool results to find what fixes it."
 readme = "README.md"
 requires-python = ">=3.9"
