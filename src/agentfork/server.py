@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from . import replay, store
+from . import pricing, replay, store
 
 PAGE = Path(__file__).with_name("ui.html")
 app = FastAPI(title="agentfork")
@@ -33,15 +33,17 @@ def _preview(text, limit=160):
     return (val if isinstance(val, str) else json.dumps(val))[:limit]
 
 def _brief(run, steps=None):
+    cost = None
     if steps is not None:
         n_steps = len(steps)
         tokens = sum((s["tokens_in"] or 0) + (s["tokens_out"] or 0) for s in steps)
+        cost = pricing.steps_cost([s for s in steps if not s["cached"]])
     else:
         n_steps, tokens = run.get("n_steps", 0), run.get("tokens", 0)
     duration = f"{run['ended_at'] - run['started_at']:.1f}s" if run.get("ended_at") else "-"
     started = datetime.fromtimestamp(run["started_at"]).strftime("%m-%d %H:%M:%S")
     return {"id": run["id"], "name": run["name"], "status": run["status"], "n_steps": n_steps,
-            "tokens": tokens, "duration": duration, "started": started,
+            "tokens": tokens, "cost": cost, "duration": duration, "started": started,
             "parent_run_id": run.get("parent_run_id"), "fork_step": run.get("fork_step"),
             "input_preview": _preview(run.get("input_json")), "output_preview": _preview(run.get("output_json"))}
 
@@ -109,6 +111,7 @@ class SweepIn(BaseModel):
     values: List[str]
     repeat: int = 1
     expect: Optional[str] = None
+    parallel: int = 4
 
 def _group(label, value, rows, expect):
     n = len(rows)
@@ -117,20 +120,32 @@ def _group(label, value, rows, expect):
             "passed": None if expect is None else sum(bool(r["passed"]) for r in rows),
             "avg_tokens": round(sum(r["tokens"] for r in rows) / n),
             "avg_time_s": round(sum(r["latency_ms"] for r in rows) / n / 1000, 1),
+            "avg_cost": None if any(r["cost"] is None for r in rows) else sum(r["cost"] for r in rows) / n,
             "sample": str(rows[0]["result"])[:200],
             "run_ids": [r["run_id"] for r in rows if r["run_id"]]}
 
-@app.post("/api/sweep")
-def sweep(body: SweepIn):
+def _variants(body):
     if body.kind not in ("model", "system", "output"):
         raise HTTPException(400, "kind must be model, system or output")
     values = [v.strip() if body.kind == "model" else v for v in body.values if v.strip()]
     if not values:
         raise HTTPException(400, "Add at least one variant")
-    variants = [{body.kind: v} for v in values]
+    return [{body.kind: v} for v in values]
+
+@app.post("/api/estimate")
+def estimate(body: SweepIn):
+    try:
+        return replay.estimate(_resolve(body.run_id), body.step, _variants(body), max(1, min(body.repeat, 10)))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@app.post("/api/sweep")
+def sweep(body: SweepIn):
+    variants = _variants(body)
     run = _resolve(body.run_id)
     try:
-        results = replay.sweep(run, body.step, variants, repeat=max(1, min(body.repeat, 10)), expect=body.expect)
+        results = replay.sweep(run, body.step, variants, repeat=max(1, min(body.repeat, 10)), expect=body.expect,
+                               parallel=max(1, min(body.parallel, 10)))
     except ValueError as e:
         raise HTTPException(400, str(e))
     groups = [_group("original", None, [replay.baseline(run, body.step, body.expect)], body.expect)]

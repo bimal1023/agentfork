@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 authors = [{ name = "Bimal Kumal" }]
-keywords = ["llm", "agents", "debugging", "replay", "testing", "openai", "anthropic"]
+keywords = ["llm", "agents", "debugging", "replay", "testing", "openai", "anthropic", "langgraph"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -20,7 +20,7 @@ dependencies = ["typer", "rich"]
 openai = ["openai"]
 anthropic = ["anthropic"]
 ui = ["fastapi", "uvicorn"]
-dev = ["pytest", "openai", "anthropic", "fastapi", "uvicorn", "httpx"]
+dev = ["pytest", "openai", "anthropic", "fastapi", "uvicorn", "httpx", "langgraph", "langchain-openai"]
 
 [project.urls]
 Homepage = "https://github.com/bimal1023/agentfork"

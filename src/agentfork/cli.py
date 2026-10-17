@@ -3,12 +3,13 @@ from datetime import datetime
 from typing import List, Optional
 
 import typer
+from rich import box
 from rich.console import Console
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.tree import Tree
 
-from . import replay, store
+from . import pricing, replay, store
 
 app = typer.Typer(help="agentfork: record, inspect and replay LLM agent runs.")
 console = Console()
@@ -84,10 +85,13 @@ def show(run_id: str = typer.Argument(..., help="Run id or its first few charact
     color = STATUS_COLOR.get(run["status"], "white")
     fork = (f" [dim]fork of {run['parent_run_id'][:8]} at step {run['fork_step']}[/dim]"
             if run.get("parent_run_id") else "")
+    steps = store.get_steps(run["id"])
+    cost = pricing.steps_cost([s for s in steps if not s["cached"]])
+    cost = f" [dim]{pricing.fmt(cost)}[/dim]" if cost is not None else ""
     root = Tree(f"[bold]{run['name']}[/bold] {run['id'][:8]} "
-                f"[{color}]{run['status']}[/{color}] {_duration(run)}{fork}")
+                f"[{color}]{run['status']}[/{color}] {_duration(run)}{cost}{fork}")
     nodes = {}
-    for s in store.get_steps(run["id"]):
+    for s in steps:
         node = nodes.get(s["parent_id"], root).add(_label(s))
         if full:
             node.add(Syntax(json.dumps(_load(s["input_json"]), indent=2), "json", word_wrap=True))
@@ -195,6 +199,13 @@ def _make_labels(variants):
             labels[id(v)] = f"{key} #{counts[key]}"
     return labels
 
+def _clip(text, n):
+    return text if len(text) <= n else text[:n - 1] + "…"
+
+def _avg_cost(rows):
+    costs = [r["cost"] for r in rows]
+    return "-" if None in costs else pricing.fmt(sum(costs) / len(costs))
+
 @app.command()
 def sweep(run_id: str = typer.Argument(..., help="Run to sweep."),
           step: int = typer.Option(..., "--step", help="Step to vary (see `show`)."),
@@ -202,7 +213,8 @@ def sweep(run_id: str = typer.Argument(..., help="Run to sweep."),
           system: Optional[List[str]] = typer.Option(None, "--system", help="System prompt to try; repeat for more."),
           output: Optional[List[str]] = typer.Option(None, "--output", help="Tool result to try; repeat for more."),
           repeat: int = typer.Option(1, "--repeat", help="Runs per variant (LLMs vary run to run)."),
-          expect: Optional[str] = typer.Option(None, "--expect", help="Text a good final output contains.")):
+          expect: Optional[str] = typer.Option(None, "--expect", help="Text a good final output contains."),
+          parallel: int = typer.Option(4, "--parallel", help="How many runs to make at the same time.")):
     """Fork one step across several models, prompts or tool results and compare outcomes."""
     variants = [{"model": m.strip()} for m in (model or "").split(",") if m.strip()]
     variants += [{"system": s} for s in (system or [])]
@@ -213,7 +225,17 @@ def sweep(run_id: str = typer.Argument(..., help="Run to sweep."),
     run = _resolve(run_id)
     labels = _make_labels(variants)
     console.print(f"[bold]Sweeping step {step} of {run['id'][:8]}: "
-                  f"{len(variants)} variants x {repeat} = {len(variants) * repeat} runs[/bold]")
+                  f"{len(variants)} variants x {repeat} = {len(variants) * repeat} runs, "
+                  f"{min(parallel, len(variants) * repeat)} at a time[/bold]")
+    try:
+        est = replay.estimate(run, step, variants, repeat)
+    except ValueError:
+        est = None
+    if est and est["total"] is not None:
+        console.print(f"[dim]Estimated cost: about {pricing.fmt(est['total'])}[/dim]")
+    elif est and est["unpriced"]:
+        console.print(f"[dim]Estimated cost unknown: no price for {', '.join(est['unpriced'])} "
+                      f"(add it to .agentfork/prices.json)[/dim]")
 
     def progress(r):
         mark = "[green]ok[/green]" if r["status"] == "ok" else "[red]error[/red]"
@@ -221,7 +243,8 @@ def sweep(run_id: str = typer.Argument(..., help="Run to sweep."),
         console.print(f"  {mark}{verdict} {labels[id(r['variant'])]} [dim]{r['tokens']} tok[/dim]")
 
     try:
-        results = replay.sweep(run, step, variants, repeat=repeat, expect=expect, on_result=progress)
+        results = replay.sweep(run, step, variants, repeat=repeat, expect=expect,
+                               on_result=progress, parallel=parallel)
     except ValueError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1)
@@ -229,28 +252,30 @@ def sweep(run_id: str = typer.Argument(..., help="Run to sweep."),
     groups = {"original": [replay.baseline(run, step, expect)]}
     for r in results:
         groups.setdefault(labels[id(r["variant"])], []).append(r)
-    table = Table(title=f"Sweep of step {step} ({run['id'][:8]})", show_lines=True)
+    table = Table(title=f"Sweep of step {step} ({run['id'][:8]})", box=box.SIMPLE_HEAD,
+                  caption="tokens, time and cost are averages per run", caption_justify="left")
     table.add_column("variant", no_wrap=True)
-    table.add_column("runs", no_wrap=True, min_width=4)
-    table.add_column("ok", no_wrap=True, min_width=3)
+    table.add_column("ok", no_wrap=True)
     if expect:
-        table.add_column("pass", no_wrap=True, min_width=4)
-    table.add_column("avg tokens", no_wrap=True, min_width=6)
-    table.add_column("avg time", no_wrap=True, min_width=6)
-    table.add_column("sample output", max_width=36, overflow="ellipsis", no_wrap=True)
-    table.add_column("run ids", no_wrap=True)
+        table.add_column("pass", no_wrap=True)
+    table.add_column("tokens", no_wrap=True, justify="right")
+    table.add_column("time", no_wrap=True, justify="right")
+    table.add_column("cost", no_wrap=True, justify="right")
+    table.add_column("sample output", max_width=40)
+    table.add_column("runs", no_wrap=True)
     for label, rs in groups.items():
         n = len(rs)
         ids = [(r["run_id"] or "-")[:8] for r in rs]
-        row = [label, str(n), f"{sum(r['status'] == 'ok' for r in rs)}/{n}"]
+        row = [label, f"{sum(r['status'] == 'ok' for r in rs)}/{n}"]
         if expect:
             passed = sum(bool(r["passed"]) for r in rs)
             color = "green" if passed == n else ("yellow" if passed else "red")
             row.append(f"[{color}]{passed}/{n}[/{color}]")
         row += [f"{sum(r['tokens'] for r in rs) / n:.0f}",
                 f"{sum(r['latency_ms'] for r in rs) / n / 1000:.1f}s",
-                str(rs[0]["result"]),
-                ", ".join(ids[:2]) + (f" +{len(ids) - 2}" if len(ids) > 2 else "")]
+                _avg_cost(rs),
+                _clip(str(rs[0]["result"]), 60 if console.width >= 100 else 30),
+                ids[0] + (f" +{n - 1}" if n > 1 else "")]
         table.add_row(*row)
     console.print(table)
     for v in variants:

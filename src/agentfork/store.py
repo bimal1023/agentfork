@@ -29,7 +29,8 @@ def db_path():
 def connect():
     path = db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
     for sql in MIGRATIONS:
         try:
@@ -68,3 +69,9 @@ def find_runs(prefix):
 
 def get_steps(run_id):
     return query("SELECT * FROM steps WHERE run_id = ? ORDER BY seq", (run_id,))
+
+def tokens_for(cache_key):
+    """Token counts from the run that made this call live; cached copies don't record them."""
+    rows = query("SELECT tokens_in, tokens_out FROM steps WHERE cache_key = ? AND tokens_in IS NOT NULL LIMIT 1",
+                 (cache_key,))
+    return (rows[0]["tokens_in"], rows[0]["tokens_out"]) if rows else (None, None)

@@ -141,7 +141,7 @@ pre{margin:0;background:var(--sheet);border:1px solid var(--rule);border-radius:
 .field small{font-size:12px;color:var(--ink-3)}
 .field input,.field textarea{width:100%;background:var(--paper);border:1px solid var(--rule-2);border-radius:5px;padding:7px 9px}
 .field textarea{font:12.5px/1.5 var(--mono);resize:vertical}
-.cols{display:grid;grid-template-columns:140px 1fr;gap:14px;align-items:start}
+.cols{display:grid;grid-template-columns:130px 130px 1fr;gap:14px;align-items:start}
 .seg{display:inline-flex;border:1px solid var(--rule-2);border-radius:6px;overflow:hidden;width:max-content}
 .seg button{border:0;background:none;padding:4px 12px;font-size:13px;cursor:pointer}
 .seg button[aria-pressed=true]{background:var(--ink);color:var(--sheet)}
@@ -233,6 +233,7 @@ const fmtOut = o => typeof o === "string" ? o : JSON.stringify(o, null, 2);
 const compact = o => typeof o === "string" ? o : JSON.stringify(o);
 const clip = (s, n = 400) => s.length > n ? s.slice(0, n) + "…" : s;
 const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+const fmtCost = c => c == null ? "-" : c < 0.01 ? "$" + c.toFixed(4) : "$" + c.toFixed(2);
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
@@ -462,6 +463,7 @@ async function showRun(id) {
       <div><dt>steps</dt><dd>${r.n_steps}</dd></div>
       <div><dt>tokens</dt><dd>${fmtNum(r.tokens)}</dd></div>
       <div><dt>duration</dt><dd>${r.duration}</dd></div>
+      ${r.cost != null ? `<div><dt>cost</dt><dd>${fmtCost(r.cost)}</dd></div>` : ""}
       <div><dt>from cache</dt><dd>${cached}</dd></div>
     </dl>
     <div class="legend">
@@ -560,26 +562,38 @@ function openPanel(kind, seq) {
         <div><button class="link" type="button" data-add>Add another</button></div></div>
       <div class="cols">
         ${field("repeat", "Runs per change", "", "3")}
+        ${field("parallel", "Run at the same time", "", "4")}
         ${field("expect", "A run passes if the final output contains", "For example the correct number or a word the answer must include. Leave blank to skip scoring.", "")}
       </div>
       <div class="go"><button class="btn primary" type="submit">Run the test</button><span class="cost"></span><span class="msg"></span></div>
       <div class="results"></div></form>`;
     const form = slot.querySelector("form");
     form.elements.expect.placeholder = "e.g. 49.99";
-    form.elements.repeat.type = "number"; form.elements.repeat.min = 1; form.elements.repeat.max = 10;
-    const original = {model, system: sys, output: compact(s.output)};
+    ["repeat", "parallel"].forEach(n => Object.assign(form.elements[n], {type: "number", min: 1, max: 10}));
     const titles = {model: "Models to try", system: "System prompts to try", output: "Tool results to try"};
     const firstValue = {model: "", system: sys, output: compact(s.output)};
-    const hints = {model: `The original model, ${model}, is always tested too. Add the models you want to compare it with.`,
-      system: "Change 1 starts as a copy of the original prompt. Edit it, or add more versions below. The original is always tested too.",
+    const hints = {model: `The original run used ${model}. Include it here too to see how often it passes over several runs.`,
+      system: "Change 1 starts as a copy of the original prompt. Keep it to see how often the original passes over several runs, and add your edited versions below.",
       output: "Change 1 starts as a copy of what the tool returned. Edit it to pretend the tool gave a different answer."};
     const box = form.querySelector(".variants");
     let k = kinds[0][0];
 
     const values = () => [...box.querySelectorAll("[data-v]")].map(el => el.value).filter(v => v.trim());
+    let costTimer = null;
     const updateCost = () => {
-      const n = values().length * Math.max(1, Math.min(10, +form.elements.repeat.value || 1));
-      form.querySelector(".cost").textContent = n ? `${plural(n, "run")} from step ${seq} onward, using your real API keys` : "";
+      const repeat = Math.max(1, Math.min(10, +form.elements.repeat.value || 1));
+      const vals = values(), n = vals.length * repeat, el = form.querySelector(".cost");
+      if (!n) { el.textContent = ""; return; }
+      const base = `${plural(n, "run")} from step ${seq} onward, using your real API keys.`;
+      el.textContent = base;
+      clearTimeout(costTimer);
+      costTimer = setTimeout(async () => {
+        try {
+          const est = await api("/api/estimate", {run_id: current, step: seq, kind: k, values: vals, repeat});
+          el.textContent = est.total != null ? `${base} Estimated cost about ${fmtCost(est.total)}.`
+            : est.unpriced.length ? `${base} Cost unknown: no price for ${est.unpriced.join(", ")}.` : base;
+        } catch { el.textContent = base; }
+      }, 300);
     };
     const addVariant = (value = "") => {
       const i = box.children.length + 1;
@@ -613,12 +627,11 @@ function openPanel(kind, seq) {
       ev.preventDefault();
       const vals = values();
       if (!vals.length) return say(form, "Add at least one change to test.", true);
-      const same = vals.findIndex(v => v.trim() === String(original[k]).trim());
-      if (same >= 0) return say(form, `Change ${same + 1} is the same as the original. Edit it or remove it.`, true);
       const repeat = Math.max(1, Math.min(10, +form.elements.repeat.value || 1));
       const expect = form.elements.expect.value.trim() || null;
-      run(form, `Running ${plural(vals.length * repeat, "run")}`, async () => {
-        const res = await api("/api/sweep", {run_id: current, step: seq, kind: k, values: vals, repeat, expect});
+      const parallel = Math.max(1, Math.min(10, +form.elements.parallel.value || 1));
+      run(form, `Running ${plural(vals.length * repeat, "run")}, ${Math.min(parallel, vals.length * repeat)} at a time`, async () => {
+        const res = await api("/api/sweep", {run_id: current, step: seq, kind: k, values: vals, repeat, expect, parallel});
         form.querySelector(".results").innerHTML = sweepHtml(res);
         say(form, "");
         loadRuns();
@@ -665,6 +678,7 @@ function sweepHtml(res) {
     <td class="num">${g.ok}/${g.runs}</td>
     <td class="num">${fmtNum(g.avg_tokens)}</td>
     <td class="num">${g.avg_time_s}s</td>
+    <td class="num">${fmtCost(g.avg_cost)}</td>
     <td class="sample">${esc(g.sample)}</td>
     <td>${g.run_ids.map(id => `<button class="link mono" data-goto="${id}">${short(id)}</button>`).join(" ")}</td></tr>`).join("");
   const bi = groups.indexOf(best);
@@ -673,7 +687,7 @@ function sweepHtml(res) {
     : best
     ? `<p class="verdict"><b>${esc(label(best, bi))}</b> passed ${best.passed} of ${best.runs} runs, compared with ${groups[0].passed} of ${groups[0].runs} for the original.${best.run_ids.length ? ` <button class="link" data-goto="${best.run_ids[0]}">Open one of its runs</button>` : ""}</p>`
     : `<p class="verdict">None of the changes passed more often than the original. Try different changes, or test a different step.</p>`;
-  return `<h4>Results</h4><table><thead><tr><th>Change</th>${hasExpect ? "<th>Passed</th>" : ""}<th>Finished without error</th><th>Avg tokens</th><th>Avg time</th><th>Example output</th><th>Runs</th></tr></thead>
+  return `<h4>Results</h4><table><thead><tr><th>Change</th>${hasExpect ? "<th>Passed</th>" : ""}<th>Finished without error</th><th>Avg tokens</th><th>Avg time</th><th>Avg cost</th><th>Example output</th><th>Runs</th></tr></thead>
     <tbody>${rows}</tbody></table>${verdict}`;
 }
 

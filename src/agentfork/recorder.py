@@ -162,6 +162,8 @@ def trace(fn=None, *, name=None):
                 "parent_run_id": parent_run, "fork_step": replay.get("fork_step") if parent_run else None,
             })
             last_run_id = run_id
+            if replay:
+                replay["run_id"] = run_id
             t_run, t_seq, t_parent = _run_id.set(run_id), _seq.set([0]), _parent_step.set(None)
             status, output = "error", None
             try:
@@ -170,6 +172,8 @@ def trace(fn=None, *, name=None):
                 return output
             finally:
                 last_run_seq = _seq.get()[0]
+                if replay:
+                    replay["seq"] = last_run_seq
                 _run_id.reset(t_run); _seq.reset(t_seq); _parent_step.reset(t_parent)
                 store.update_run(run_id, ended_at=time.time(), status=status, output_json=dumps(output))
                 print(f"[agentfork] saved run {run_id[:8]} ({status})")
@@ -182,20 +186,48 @@ def tool(fn):
         return record_step("tool", fn.__name__, fn, args, kwargs)
     return wrapper
 
+class _RawResponse:
+    """Minimal stand-in for the SDKs' raw responses, for callers that use .with_raw_response (LangChain)."""
+    def __init__(self, parsed):
+        self._parsed, self.headers = parsed, {}
+    def parse(self):
+        return self._parsed
+
+class _WithRawResponse:
+    def __init__(self, create):
+        self.create = lambda *args, **kwargs: _RawResponse(create(*args, **kwargs))
+
+def _patch(resource, provider):
+    original = resource.create
+    def create(*args, **kwargs):
+        return record_step("llm", kwargs.get("model", "llm"), original, args, kwargs, provider=provider)
+    resource.create = create
+    resource.with_raw_response = _WithRawResponse(create)
+
 def wrap_openai(client):
     from openai.types.chat import ChatCompletion
     _LLM_DECODERS["openai"] = ChatCompletion.model_validate
-    original = client.chat.completions.create
-    def create(*args, **kwargs):
-        return record_step("llm", kwargs.get("model", "llm"), original, args, kwargs, provider="openai")
-    client.chat.completions.create = create
+    _patch(client.chat.completions, "openai")
     return client
 
 def wrap_anthropic(client):
     from anthropic.types import Message
     _LLM_DECODERS["anthropic"] = Message.model_validate
-    original = client.messages.create
-    def create(*args, **kwargs):
-        return record_step("llm", kwargs.get("model", "llm"), original, args, kwargs, provider="anthropic")
-    client.messages.create = create
+    _patch(client.messages, "anthropic")
     return client
+
+def wrap_langchain(llm):
+    """Record the calls a LangChain chat model makes, e.g. inside a LangGraph agent.
+
+    Works with ChatOpenAI and ChatAnthropic (non-streaming). Wrap the model before
+    passing it to the graph; models returned by bind_tools are handled too.
+    """
+    model = getattr(llm, "bound", llm)
+    if getattr(model, "root_client", None) is not None:
+        wrap_openai(model.root_client)
+        return llm
+    client = getattr(model, "_client", None)
+    if client is not None and hasattr(client, "messages"):
+        wrap_anthropic(client)
+        return llm
+    raise TypeError(f"agentfork can't record {type(model).__name__}; use ChatOpenAI or ChatAnthropic")

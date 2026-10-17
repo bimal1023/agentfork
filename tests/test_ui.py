@@ -33,6 +33,10 @@ def test_ui_endpoints(tmp_path, monkeypatch):
     forked = client.post("/api/fork", json={"run_id": run_id, "step": 1, "output": "sunny"}).json()
     assert client.get(f"/api/runs/{forked['run_id']}").json()["output"] == "paris is sunny"
 
+    est = client.post("/api/estimate", json={"run_id": run_id, "step": 1, "kind": "output", "values": ["sunny"]}).json()
+    assert est == {"per_run": [0.0], "total": 0.0, "unpriced": []}
+
     sweep = client.post("/api/sweep", json={"run_id": run_id, "step": 1, "kind": "output",
-                                            "values": ["sunny", "rainy"], "repeat": 2, "expect": "sunny"}).json()
+                                            "values": ["sunny", "rainy"], "repeat": 2, "expect": "sunny",
+                                            "parallel": 2}).json()
     assert [g["passed"] for g in sweep["groups"]] == [0, 2, 0]
