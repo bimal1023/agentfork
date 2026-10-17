@@ -703,7 +703,7 @@ async function compare(a, b) {
   const by = d => Object.fromEntries(d.steps.map(s => [s.seq, s]));
   const sa = by(A), sb = by(B);
   const seqs = [...new Set([...A.steps, ...B.steps].map(s => s.seq))].sort((x, y) => x - y);
-  const same = q => sa[q] && sb[q] && sa[q].name === sb[q].name && sa[q].summary === sb[q].summary;
+  const same = q => sa[q] && sb[q] && sa[q].name === sb[q].name && describe(sa[q]) === describe(sb[q]);
   const first = seqs.find(q => !same(q));
   const cell = s => s ? `<div class="k"><span class="step ${s.type}"><span class="kind">${s.type === "llm" ? "LLM" : "tool"}</span></span><b>${esc(s.name)}</b>${s.cached ? '<span class="tag">from cache</span>' : ""}</div><div class="summary" style="margin:0">${describe(s)}</div>` : '<span class="quiet">No step</span>';
   const head = r => `<button class="link mono" data-goto="${r.run.id}">${short(r.run.id)}</button> <span class="quiet">${r.run.parent_run_id ? "fork" : "original"}</span>`;
