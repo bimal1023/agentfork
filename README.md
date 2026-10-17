@@ -41,7 +41,7 @@ Steps 1 and 2 replayed from cache in every run, so only the step that mattered w
 ## Quickstart
 
 ```bash
-pip install "agentfork-cli[openai]"      # or agentfork[anthropic]
+pip install "agentfork-cli[openai]"      # or agentfork-cli[anthropic]
 ```
 
 Add three things to your agent:
@@ -71,6 +71,31 @@ Run your agent as usual. Each run is saved to `.agentfork/traces.db`.
 | `agentfork sweep <id> --step N --model a,b --system ... --repeat K --expect TEXT` | Try many variants of step N, K times each, and compare pass rate, tokens and time |
 | `agentfork diff <a> <b>` | Compare two runs step by step |
 | `agentfork save-test <id>` | Save a run as a pytest test that replays from cache in CI with no API key |
+| `agentfork ui [--port N]` | Open the local web UI to browse, fork, sweep and compare runs |
+
+## Web UI
+
+Prefer clicking to typing? The same fork, sweep and diff are available in a local web UI.
+
+```bash
+pip install "agentfork-cli[openai,ui]"
+agentfork ui        # opens http://127.0.0.1:8000
+```
+
+Start it from the folder you ran your agent in, since runs are saved to `.agentfork/` there. The server only listens on your own machine.
+
+1. **Find the step that went wrong.** Pick a run on the left. Its timeline shows each LLM and tool call in plain words, such as `Decided to call issue_refund(amount_usd=4999)`. Click a step to see its full input and output.
+2. **Try a change.** On that step, use another model, edit the system prompt, or fake a tool's result. Earlier steps replay from cache, and the new run appears under the original.
+3. **Test several.** Enter a few changes, how many times to run each, and text the final output must contain. You get a pass rate per change, with the original run as the baseline:
+
+   ```text
+   Change      Passed   Example output
+   Original    ○ 0/1    I have processed a refund of $4,999.00...
+   Change 1    ●●● 3/3  I have processed a refund of $49.99...
+   Change 2    ○○○ 0/3  I have processed a refund of $4,999.00...
+   ```
+
+4. **Compare.** Tick two runs to see them side by side, with the first step where they differ highlighted.
 
 ## How it works
 
@@ -88,6 +113,7 @@ agentfork overlaps with record/replay tools like [agent-rewind](https://pypi.org
 - [x] Recorder, CLI viewer, fork, diff, snapshot tests
 - [x] OpenAI and Anthropic support
 - [x] Sweep with repeats and pass rates
+- [x] Local web UI
 - [ ] Cost estimates per variant
 - [ ] Parallel sweeps
 - [ ] LangGraph integration

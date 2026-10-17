@@ -1,0 +1,738 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agentfork</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#edf0f3;--sheet:#f8f9fb;--ink:#17202b;--ink-2:#4a5664;--ink-3:#7c8794;--rule:#d5dbe2;--rule-2:#c3cbd4;
+  --llm:#3346c4;--llm-soft:#e3e7fb;--tool:#a8670f;--tool-soft:#f6ead6;
+  --pass:#17804a;--pass-soft:#dcf1e4;--fail:#c42a3c;--fail-soft:#f9e0e3;--focus:#3346c4;
+  --sans:"Instrument Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root{
+  --paper:#151a21;--sheet:#1c222b;--ink:#e6eaef;--ink-2:#aab4c0;--ink-3:#77828f;--rule:#2b333e;--rule-2:#3a4450;
+  --llm:#8d9bff;--llm-soft:#262d52;--tool:#e5a54a;--tool-soft:#3a2d17;
+  --pass:#4fc983;--pass-soft:#16362a;--fail:#ff7a88;--fail-soft:#40202a;--focus:#8d9bff;
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;font:14px/1.5 var(--sans);background:var(--paper);color:var(--ink);-webkit-font-smoothing:antialiased}
+button,input,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:4px}
+.mono{font-family:var(--mono);font-size:12.5px}
+code{font:12.5px var(--mono);background:var(--sheet);border:1px solid var(--rule);border-radius:4px;padding:0 4px;word-break:break-word}
+.quiet{color:var(--ink-3)}
+a,.link{color:var(--llm);text-decoration:none;background:none;border:0;padding:0;cursor:pointer;font-weight:500}
+a:hover,.link:hover{text-decoration:underline}
+
+/* frame */
+.app{display:grid;grid-template-columns:330px minmax(0,1fr);grid-template-rows:auto 1fr;height:100vh}
+header{grid-column:1/-1;display:flex;align-items:center;gap:16px;padding:10px 20px;border-bottom:1px solid var(--rule);background:var(--sheet)}
+.mark{display:flex;align-items:center;gap:8px;font-weight:700;font-size:16px;letter-spacing:-.01em}
+.mark svg{color:var(--llm)}
+.tagline{font-size:13px;color:var(--ink-3)}
+header .spacer{flex:1}
+#compare{display:flex;align-items:center;gap:10px;font-size:13px}
+
+/* buttons */
+.btn{border:1px solid var(--rule-2);background:var(--sheet);border-radius:6px;padding:5px 12px;cursor:pointer;font-weight:500;font-size:13px;white-space:nowrap}
+.btn:hover:not(:disabled){border-color:var(--ink-3)}
+.btn.primary{background:var(--ink);color:var(--sheet);border-color:var(--ink)}
+.btn.primary:hover:not(:disabled){opacity:.88}
+.btn:disabled{opacity:.45;cursor:default}
+.btn.small{padding:2px 9px;font-size:12.5px}
+
+/* run tree */
+aside{border-right:1px solid var(--rule);background:var(--sheet);overflow:auto;padding:8px 0 24px}
+.tree-head{padding:8px 16px 8px;font-size:12px;color:var(--ink-3)}
+.tree-head b{display:block;font-size:13px;color:var(--ink-2);font-weight:600}
+.node{position:relative}
+.run{display:grid;grid-template-columns:16px 1fr;gap:8px;align-items:start;padding:8px 14px 8px 12px;cursor:pointer;border-left:3px solid transparent}
+.run:hover{background:var(--paper)}
+.run.active{background:var(--llm-soft);border-left-color:var(--llm)}
+.run input{margin:3px 0 0;accent-color:var(--llm)}
+.run-line{display:flex;align-items:center;gap:7px;min-width:0}
+.run-title-text{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.run-meta{display:flex;gap:10px;font-size:12px;color:var(--ink-3);flex-wrap:wrap}
+.dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--pass)}
+.dot.error{background:var(--fail)}.dot.running{background:var(--tool)}
+.state{font-size:11.5px;font-weight:600;color:var(--fail)}.state.running{color:var(--tool)}
+.children{margin-left:26px;border-left:1px solid var(--rule-2)}
+.children .run{padding-left:10px}
+.children .run::before{content:"";position:absolute;left:-1px;top:17px;width:9px;border-top:1px solid var(--rule-2)}
+.fold{display:block;margin:0 0 6px 41px;font-size:12.5px}
+
+/* run view */
+main{overflow:auto;padding:28px 40px 80px}
+.wrap{max-width:980px}
+
+.guide{margin:0 0 28px;padding:16px 18px 18px;background:var(--sheet);border:1px solid var(--rule);border-radius:8px}
+.guide-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:12px}
+.guide h2{margin:0;font-size:15px}
+.guide ol{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,1fr);gap:18px;counter-reset:g}
+.guide li{counter-increment:g;display:grid;grid-template-columns:26px 1fr;gap:8px;font-size:13px;color:var(--ink-2)}
+.guide li::before{content:counter(g);width:22px;height:22px;border-radius:50%;background:var(--ink);color:var(--sheet);font-weight:600;font-size:12px;display:grid;place-items:center}
+.guide li b{display:block;color:var(--ink);font-size:13.5px;margin-bottom:2px}
+
+.run-title{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:0 0 6px}
+.run-title h1{font-size:24px;line-height:1.2;letter-spacing:-.02em;margin:0;font-weight:700}
+.run-title .mono{word-break:break-all}
+.lineage{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:13.5px;color:var(--ink-2);margin:0 0 18px}
+.flash{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 18px;padding:10px 14px;border-radius:6px;background:var(--pass-soft);font-size:13.5px}
+.asked{margin:0 0 20px;max-width:78ch}
+.asked h3,.final h3{margin:0 0 4px;font-size:12.5px;font-weight:600;color:var(--ink-3)}
+.asked p{margin:0;font-size:16px;line-height:1.45;white-space:pre-wrap;word-break:break-word}
+.stats{display:flex;gap:28px;margin:0 0 26px;padding:0}
+.stats div{display:flex;flex-direction:column}
+.stats dt{font-size:12px;color:var(--ink-3);order:2}
+.stats dd{margin:0;font-size:18px;font-weight:600;font-variant-numeric:tabular-nums}
+.legend{display:flex;gap:18px;font-size:12px;color:var(--ink-3);margin:0 0 10px;flex-wrap:wrap}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+
+/* timeline */
+.timeline{list-style:none;margin:0;padding:0}
+.step{position:relative;display:grid;grid-template-columns:36px 1fr;--c:var(--llm);--soft:var(--llm-soft)}
+.step.tool{--c:var(--tool);--soft:var(--tool-soft)}
+.rail{position:relative}
+.rail::before{content:"";position:absolute;left:50%;top:0;bottom:0;border-left:2px solid var(--rule-2);transform:translateX(-1px)}
+.step:first-child .rail::before{top:18px}
+.step.cached .rail::before{border-left-style:dashed}
+.pin{position:absolute;left:50%;top:12px;width:14px;height:14px;margin-left:-7px;border-radius:50%;background:var(--c);border:2px solid var(--c);box-shadow:0 0 0 4px var(--paper)}
+.step.cached .pin{background:var(--paper)}
+.step.error .pin{background:var(--fail);border-color:var(--fail)}
+.step.forkpoint .pin{width:18px;height:18px;margin-left:-9px;top:10px;box-shadow:0 0 0 3px var(--paper),0 0 0 5px var(--c)}
+.body{padding:6px 0 20px;min-width:0}
+.head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.toggle{display:flex;align-items:center;gap:10px;background:none;border:0;padding:2px 0;cursor:pointer;text-align:left;min-width:0}
+.seq{font-variant-numeric:tabular-nums;color:var(--ink-3);font-size:13px;width:18px}
+.kind{font-size:11.5px;font-weight:600;color:var(--c);background:var(--soft);border-radius:4px;padding:1px 7px}
+.sname{font-weight:600;font-size:15px}
+.chev{color:var(--ink-3);transition:transform .15s}
+[aria-expanded=true] .chev{transform:rotate(90deg)}
+.facts{display:flex;gap:12px;font-size:12.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.tag{font-size:11.5px;font-weight:500;color:var(--ink-2);border:1px solid var(--rule-2);border-radius:4px;padding:0 6px}
+.tag.err{color:var(--fail);border-color:currentColor}
+.tag.forked{color:var(--c);border-color:currentColor}
+.actions{margin-left:auto;display:flex;gap:6px}
+.summary{margin:6px 0 0 28px;color:var(--ink-2);word-break:break-word;max-width:80ch;display:grid;gap:3px}
+.summary.err{color:var(--fail)}
+.summary .verb{color:var(--ink-3);font-size:12.5px;margin-right:6px}
+.details{margin:10px 0 0 28px;display:grid;gap:10px}
+.details h4{margin:0 0 4px;font-size:12px;font-weight:600;color:var(--ink-3)}
+pre{margin:0;background:var(--sheet);border:1px solid var(--rule);border-radius:6px;padding:10px 12px;overflow:auto;max-height:340px;font:12px/1.55 var(--mono)}
+.final .pin{border-radius:3px;background:var(--ink);border-color:var(--ink)}
+.final .rail::before{bottom:auto;height:12px}
+.final .out{margin:0;padding:12px 14px;background:var(--sheet);border:1px solid var(--rule);border-radius:6px;max-width:78ch;word-break:break-word;white-space:pre-wrap;font-size:15px}
+
+/* fork / sweep panel */
+.panel{margin:12px 0 4px 28px;padding:16px 18px 18px;background:var(--sheet);border:1px solid var(--rule);border-left:3px solid var(--c);border-radius:6px;display:grid;gap:14px}
+.panel-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.panel h3{margin:0;font-size:15px}
+.panel p{margin:0;font-size:13px;color:var(--ink-2);max-width:72ch}
+.field{display:grid;gap:4px}
+.field label,.field .lbl{font-size:12.5px;font-weight:600;color:var(--ink-2)}
+.field small{font-size:12px;color:var(--ink-3)}
+.field input,.field textarea{width:100%;background:var(--paper);border:1px solid var(--rule-2);border-radius:5px;padding:7px 9px}
+.field textarea{font:12.5px/1.5 var(--mono);resize:vertical}
+.cols{display:grid;grid-template-columns:140px 1fr;gap:14px;align-items:start}
+.seg{display:inline-flex;border:1px solid var(--rule-2);border-radius:6px;overflow:hidden;width:max-content}
+.seg button{border:0;background:none;padding:4px 12px;font-size:13px;cursor:pointer}
+.seg button[aria-pressed=true]{background:var(--ink);color:var(--sheet)}
+.variants{display:grid;gap:8px}
+.variant{display:grid;grid-template-columns:76px 1fr auto;gap:8px;align-items:start}
+.variant .vn{font-size:12.5px;color:var(--ink-3);padding-top:8px}
+.variant .link{padding-top:8px;font-size:12.5px;color:var(--ink-3)}
+.go{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.cost{font-size:12.5px;color:var(--ink-3)}
+.msg{font-size:13px;color:var(--ink-2)}.msg.err{color:var(--fail)}
+
+/* sweep results */
+.results:empty{display:none}
+.results{overflow-x:auto;border-top:1px solid var(--rule);padding-top:12px}
+.results h4{margin:0 0 6px;font-size:14px}
+.results table{border-collapse:collapse;width:100%;font-size:13px}
+.results th{font-size:12px;font-weight:500;color:var(--ink-3);text-align:left;padding:6px 10px;border-bottom:1px solid var(--rule-2);white-space:nowrap}
+.results td{padding:9px 10px;border-bottom:1px solid var(--rule);vertical-align:top}
+.results td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.results tr.best td{background:var(--pass-soft)}
+.results tr.best td:first-child{box-shadow:inset 3px 0 var(--pass)}
+.vlabel{font-weight:600;white-space:nowrap}
+.vvalue{font-size:12px;color:var(--ink-3);max-width:30ch;word-break:break-word;margin-top:2px}
+.dots{display:flex;gap:3px;align-items:center}
+.dots i{width:9px;height:9px;border-radius:50%;background:var(--fail-soft);border:1.5px solid var(--fail)}
+.dots i.p{background:var(--pass);border-color:var(--pass)}
+.dots b{margin-left:6px;font-weight:600;font-variant-numeric:tabular-nums}
+.sample{color:var(--ink-2);max-width:40ch;word-break:break-word}
+.verdict{font-size:13.5px;margin:12px 0 0}
+
+/* compare */
+.cmp{border-collapse:collapse;width:100%;font-size:13px;table-layout:fixed}
+.cmp th{text-align:left;font-weight:500;color:var(--ink-3);font-size:12px;padding:6px 12px;border-bottom:1px solid var(--rule-2)}
+.cmp th:first-child{width:64px}
+.cmp td{padding:10px 12px;border-bottom:1px solid var(--rule);vertical-align:top;word-break:break-word}
+.cmp td:first-child{color:var(--ink-3);font-variant-numeric:tabular-nums}
+.cmp tr.same td:not(:first-child){color:var(--ink-3)}
+.cmp tr.diff td{background:color-mix(in srgb,var(--tool) 9%,transparent)}
+.cmp tr.first td:first-child{box-shadow:inset 3px 0 var(--tool)}
+.cmp .k{display:flex;gap:8px;align-items:center;margin-bottom:3px}
+.cmp .step{display:inline}
+.diverge{font-size:14px;color:var(--ink-2);margin:0 0 16px}
+
+.empty{max-width:60ch;margin:8vh auto 0;color:var(--ink-2)}
+.empty h2{font-size:20px;margin:0 0 8px;color:var(--ink)}
+.empty ol{padding-left:20px;display:grid;gap:14px}
+.empty pre{margin-top:6px}
+.tree-empty{padding:16px;color:var(--ink-3);font-size:13px}
+
+@media (max-width:980px){.guide ol{grid-template-columns:1fr;gap:10px}}
+@media (max-width:820px){
+  .app{grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto 1fr;height:auto;min-height:100vh}
+  aside{max-height:38vh;border-right:0;border-bottom:1px solid var(--rule)}
+  main{padding:20px 16px 60px;overflow:visible}
+  header{padding:10px 16px;flex-wrap:wrap}
+  .tagline,#compare .quiet{display:none}
+  .actions{margin-left:28px;width:100%}
+  .summary,.details,.panel{margin-left:0}
+  .cols{grid-template-columns:1fr}
+  .variant{grid-template-columns:1fr auto}.variant .vn{display:none}
+  .stats{gap:20px;flex-wrap:wrap}
+  .cmp{font-size:12.5px}.cmp th:first-child{width:40px}.cmp td,.cmp th{padding:8px 6px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="mark">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="4" cy="3.5" r="2"/><circle cx="4" cy="14.5" r="2"/><circle cx="14" cy="8" r="2"/><path d="M4 5.5v7M4 8.5c0-1.5 1-2.5 3-2.5h5"/></svg>
+      agentfork
+    </div>
+    <span class="tagline">Find the step where your agent went wrong, and test fixes for it</span>
+    <span class="spacer"></span>
+    <div id="compare"></div>
+    <button class="btn small" id="helpBtn" aria-expanded="true">How it works</button>
+  </header>
+  <aside id="tree" aria-label="Runs"></aside>
+  <main id="main"></main>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const short = id => id ? id.slice(0, 8) : "";
+const fmtMs = ms => ms >= 1000 ? (ms / 1000).toFixed(1) + "s" : Math.round(ms) + " ms";
+const fmtNum = n => Number(n || 0).toLocaleString();
+const fmtOut = o => typeof o === "string" ? o : JSON.stringify(o, null, 2);
+const compact = o => typeof o === "string" ? o : JSON.stringify(o);
+const clip = (s, n = 400) => s.length > n ? s.slice(0, n) + "…" : s;
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+
+let runs = [], selected = new Set(), current = null, open = new Set(), detail = null, flash = null;
+let showGuide = store.get("agentfork.guide") !== "hidden";
+
+async function api(path, body) {
+  const r = await fetch(path, body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)} : {});
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(typeof data.detail === "string" ? data.detail : `${r.status} ${r.statusText}`);
+  return data;
+}
+
+/* ---------- guide ---------- */
+
+const GUIDE = `<section class="guide" id="guide">
+  <div class="guide-head"><h2>How to fix a bad run</h2><button class="link" data-guide-close>Hide</button></div>
+  <ol>
+    <li><div><b>Find the step that went wrong</b>Read the timeline from top to bottom. Click a step's name to see exactly what went in and what came out.</div></li>
+    <li><div><b>Try a change at that step</b>Use another model, edit the system prompt, or pretend a tool returned something else. Earlier steps replay from cache, so they cost nothing.</div></li>
+    <li><div><b>Test several changes</b>Run each change a few times and see which one passes most often, so you're not trusting one lucky run.</div></li>
+  </ol></section>`;
+
+function setGuide(on) {
+  showGuide = on;
+  store.set("agentfork.guide", on ? "shown" : "hidden");
+  $("#helpBtn").setAttribute("aria-expanded", String(on));
+  const g = $("#guide");
+  if (g) g.hidden = !on;
+  else if (on && $("#main .wrap")) $("#main .wrap").insertAdjacentHTML("afterbegin", GUIDE);
+  if (on && $("#guide")) $("#guide").scrollIntoView({block: "nearest"});
+}
+$("#helpBtn").onclick = () => setGuide(!showGuide || ($("#guide") && $("#guide").hidden));
+$("#helpBtn").setAttribute("aria-expanded", String(showGuide));
+
+/* ---------- run tree ---------- */
+
+function buildTree() {
+  const byId = Object.fromEntries(runs.map(r => [r.id, {...r, kids: []}]));
+  const roots = [];
+  runs.forEach(r => (byId[r.parent_run_id] ? byId[r.parent_run_id].kids : roots).push(byId[r.id]));
+  return {byId, roots};
+}
+
+function runRow(r) {
+  const isFork = !!r.parent_run_id;
+  const title = isFork ? (r.output_preview || r.name) : (r.input_preview || r.name);
+  return `<div class="run ${current === r.id ? "active" : ""}" data-id="${r.id}">
+    <input type="checkbox" data-check="${r.id}" ${selected.has(r.id) ? "checked" : ""} aria-label="Select ${short(r.id)} to compare">
+    <div style="min-width:0">
+      <div class="run-line"><span class="dot ${r.status}" title="${esc(r.status)}"></span>
+        <span class="run-title-text" title="${esc(title)}">${esc(title)}</span>${r.status !== "ok" ? `<span class="state ${r.status}">${esc(r.status)}</span>` : ""}</div>
+      <div class="run-meta"><span class="mono">${short(r.id)}</span>${isFork ? `<span>changed step ${r.fork_step}</span>` : `<span>${esc(r.name)}</span>`}<span title="${r.started}">${r.started.slice(6)}</span></div>
+    </div></div>`;
+}
+
+function nodeHtml(n) {
+  const many = n.kids.length > 3 && !open.has(n.id);
+  return `<div class="node">${runRow(n)}
+    ${n.kids.length ? `<div class="children">${many ? "" : n.kids.map(nodeHtml).join("")}</div>
+      ${n.kids.length > 3 ? `<button class="link fold" data-fold="${n.id}">${many ? `Show ${plural(n.kids.length, "fork")}` : "Hide forks"}</button>` : ""}` : ""}
+  </div>`;
+}
+
+function renderTree() {
+  const {roots} = buildTree();
+  $("#tree").innerHTML = runs.length
+    ? `<div class="tree-head"><b>Your runs, newest first</b>Each fork is listed under the run it came from.</div>${roots.map(nodeHtml).join("")}`
+    : '<div class="tree-empty">No runs recorded yet.</div>';
+  renderCompareBar();
+}
+
+function revealInTree(id) {
+  const {byId} = buildTree();
+  for (let p = byId[id] && byId[byId[id].parent_run_id]; p; p = byId[p.parent_run_id]) open.add(p.id);
+}
+
+async function loadRuns() {
+  runs = await api("/api/runs?limit=200");
+  if (current) revealInTree(current);
+  renderTree();
+}
+
+function renderCompareBar() {
+  const n = selected.size;
+  $("#compare").innerHTML = n === 0 ? `<span class="quiet">Tick two runs to compare them</span>`
+    : `<span class="quiet">${n} of 2 selected</span>
+       <button class="btn small" data-clear>Clear</button>
+       <button class="btn small primary" data-compare ${n === 2 ? "" : "disabled"}>Compare</button>`;
+}
+
+$("#tree").addEventListener("click", e => {
+  const check = e.target.dataset.check;
+  if (check) {
+    if (e.target.checked) {
+      if (selected.size >= 2) selected.delete([...selected][0]);
+      selected.add(check);
+    } else selected.delete(check);
+    renderTree();
+    return;
+  }
+  const fold = e.target.dataset.fold;
+  if (fold) { open.has(fold) ? open.delete(fold) : open.add(fold); renderTree(); return; }
+  const row = e.target.closest(".run");
+  if (row) go(row.dataset.id);
+});
+
+$("#compare").addEventListener("click", e => {
+  if (e.target.dataset.clear !== undefined) { selected.clear(); renderTree(); }
+  if (e.target.dataset.compare !== undefined) { const [a, b] = [...selected]; location.hash = `compare=${a},${b}`; }
+});
+
+/* ---------- describing steps in plain words ---------- */
+
+const kv = o => o && typeof o === "object" && !Array.isArray(o)
+  ? Object.entries(o).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ")
+  : compact(o);
+
+function argsText(input) {
+  const kw = (input && input.kwargs) || {}, args = (input && input.args) || [];
+  return Object.keys(kw).length ? kv(kw) : args.map(a => JSON.stringify(a)).join(", ");
+}
+
+function llmParts(out) {
+  const calls = [];
+  let text = "";
+  if (out && Array.isArray(out.choices)) {
+    const m = (out.choices[0] || {}).message || {};
+    (m.tool_calls || []).forEach(c => {
+      let a = c.function.arguments;
+      try { a = kv(JSON.parse(a)); } catch {}
+      calls.push(`${c.function.name}(${a})`);
+    });
+    text = m.content || "";
+  } else if (out && Array.isArray(out.content)) {
+    out.content.forEach(b => {
+      if (b.type === "tool_use") calls.push(`${b.name}(${kv(b.input)})`);
+      if (b.type === "text") text += b.text;
+    });
+  } else return null;
+  return {calls, text};
+}
+
+function describe(s) {
+  if (s.error) return `<span>${esc(s.error)}</span>`;
+  if (s.type === "tool") {
+    return `<div><span class="verb">Called with</span><code>${esc(clip(argsText(s.input), 300))}</code></div>
+            <div><span class="verb">Returned</span><code>${esc(clip(compact(s.output)))}</code></div>`;
+  }
+  const p = llmParts(s.output);
+  if (!p) return esc(s.summary);
+  const lines = [];
+  if (p.text) lines.push(`<div><span class="verb">Replied</span>${esc(clip(p.text))}</div>`);
+  p.calls.forEach(c => lines.push(`<div><span class="verb">Decided to call</span><code>${esc(clip(c, 300))}</code></div>`));
+  return lines.join("") || '<span class="quiet">No reply</span>';
+}
+
+function inputText(input) {
+  if (!input) return "";
+  const args = input.args || [], kw = input.kwargs || {};
+  if (args.length === 1 && !Object.keys(kw).length && typeof args[0] === "string") return args[0];
+  return argsText(input);
+}
+
+/* ---------- run view ---------- */
+
+const go = id => { location.hash = "run=" + id; };
+
+function stepHtml(s, run) {
+  const isFork = run.parent_run_id && s.seq === run.fork_step;
+  const cls = [s.type, s.cached && "cached", s.error && "error", isFork && "forkpoint"].filter(Boolean).join(" ");
+  const tokens = s.tokens_in != null ? `<span>${fmtNum(s.tokens_in)} in / ${fmtNum(s.tokens_out)} out tokens</span>` : "";
+  return `<li class="step ${cls}" id="step-${s.seq}">
+    <div class="rail"><span class="pin"></span></div>
+    <div class="body">
+      <div class="head">
+        <button class="toggle" aria-expanded="false" aria-controls="det-${s.seq}" data-toggle="${s.seq}" title="Show full input and output">
+          <span class="seq">${s.seq}</span><span class="kind">${s.type === "llm" ? "LLM" : "tool"}</span>
+          <span class="sname">${esc(s.name)}</span>
+          <svg class="chev" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 1.5 6.5 5 3 8.5" stroke="currentColor" stroke-width="1.6" fill="none"/></svg>
+        </button>
+        <span class="facts"><span>${fmtMs(s.latency_ms)}</span>${tokens}</span>
+        ${s.cached ? '<span class="tag" title="Replayed from the original run without calling the API">from cache</span>' : ""}
+        ${isFork ? '<span class="tag forked">changed in this fork</span>' : ""}
+        ${s.error ? '<span class="tag err">error</span>' : ""}
+        <span class="actions">
+          <button class="btn small" data-action="fork" data-seq="${s.seq}" title="Rerun from this step with one change">Try a change</button>
+          <button class="btn small" data-action="sweep" data-seq="${s.seq}" title="Run several changes at this step a few times each and compare">Test several</button>
+        </span>
+      </div>
+      <div class="summary ${s.error ? "err" : ""}">${describe(s)}</div>
+      <div class="details" id="det-${s.seq}" hidden>
+        <div><h4>Full input</h4><pre>${esc(JSON.stringify(s.input, null, 2))}</pre></div>
+        <div><h4>Full output</h4><pre>${esc(JSON.stringify(s.output, null, 2))}</pre></div>
+      </div>
+      <div class="slot"></div>
+    </div></li>`;
+}
+
+async function showRun(id) {
+  current = id;
+  revealInTree(id);
+  renderTree();
+  try { detail = await api("/api/runs/" + id); }
+  catch (err) { $("#main").innerHTML = `<div class="empty"><h2>Couldn't open run ${esc(short(id))}</h2><p>${esc(err.message)}</p></div>`; return; }
+  const r = detail.run;
+  current = r.id;
+  renderTree();
+  const cached = detail.steps.filter(s => s.cached).length;
+  const asked = inputText(detail.input);
+  const compareBtn = r.parent_run_id ? `<button class="btn small" data-cmp="${r.parent_run_id},${r.id}">Compare with original</button>` : "";
+  const banner = flash === r.id
+    ? `<div class="flash" role="status"><span>Your fork finished. Check the final output at the bottom, or compare it step by step with the original run.</span>${compareBtn}</div>` : "";
+  flash = null;
+  $("#main").innerHTML = `<div class="wrap">
+    ${showGuide ? GUIDE : ""}
+    ${banner}
+    <div class="run-title"><h1>${esc(r.name)}</h1><span class="mono quiet">${r.id}</span>
+      ${r.status !== "ok" ? `<span class="state ${r.status}">${esc(r.status)}</span>` : ""}</div>
+    <div class="lineage">${r.parent_run_id
+      ? `<span>Fork of <button class="link mono" data-goto="${r.parent_run_id}">${short(r.parent_run_id)}</button> with a change at step ${r.fork_step}. Steps before it were replayed from cache.</span>${banner ? "" : compareBtn}`
+      : `<span>Original run, started ${r.started}.</span>`}</div>
+    ${asked ? `<div class="asked"><h3>Input</h3><p>${esc(clip(asked, 1200))}</p></div>` : ""}
+    <dl class="stats">
+      <div><dt>steps</dt><dd>${r.n_steps}</dd></div>
+      <div><dt>tokens</dt><dd>${fmtNum(r.tokens)}</dd></div>
+      <div><dt>duration</dt><dd>${r.duration}</dd></div>
+      <div><dt>from cache</dt><dd>${cached}</dd></div>
+    </dl>
+    <div class="legend">
+      <span><svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="var(--llm)"/></svg>LLM call</span>
+      <span><svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="var(--tool)"/></svg>tool call</span>
+      <span><svg width="12" height="12"><circle cx="6" cy="6" r="4.5" fill="none" stroke="var(--ink-3)" stroke-width="1.6"/></svg>replayed from cache</span>
+    </div>
+    <ol class="timeline">
+      ${detail.steps.map(s => stepHtml(s, r)).join("")}
+      <li class="step final"><div class="rail"><span class="pin"></span></div>
+        <div class="body"><h3>Final output</h3>
+        <div class="out">${esc(fmtOut(detail.output))}</div></div></li>
+    </ol></div>`;
+  $("#main").scrollTop = 0;
+}
+
+$("#main").addEventListener("click", e => {
+  if (e.target.closest("[data-guide-close]")) { setGuide(false); return; }
+  const t = e.target.closest("[data-goto],[data-action],[data-toggle],[data-cmp]");
+  if (!t) return;
+  if (t.dataset.goto) { go(t.dataset.goto); return; }
+  if (t.dataset.cmp) { location.hash = "compare=" + t.dataset.cmp; return; }
+  if (t.dataset.action) { openPanel(t.dataset.action, +t.dataset.seq); return; }
+  const det = document.getElementById("det-" + t.dataset.toggle);
+  det.hidden = !det.hidden;
+  t.setAttribute("aria-expanded", String(!det.hidden));
+});
+
+/* ---------- try a change (fork) & test several (sweep) ---------- */
+
+function currentSystem(input) {
+  const kw = (input && input.kwargs) || {};
+  if (typeof kw.system === "string") return kw.system;
+  if (Array.isArray(kw.system)) return kw.system.map(b => b.text || "").join("\n");
+  const m = (kw.messages || []).find(m => m.role === "system");
+  return m && typeof m.content === "string" ? m.content : "";
+}
+
+const field = (name, label, hint, value, rows) => `<div class="field"><label for="f-${name}">${label}</label>
+  ${rows ? `<textarea id="f-${name}" name="${name}" rows="${rows}">${esc(value)}</textarea>` : `<input id="f-${name}" name="${name}" value="${esc(value)}">`}
+  ${hint ? `<small>${hint}</small>` : ""}</div>`;
+
+function closePanels() {
+  document.querySelectorAll(".slot").forEach(s => { s.innerHTML = ""; delete s.dataset.kind; });
+}
+
+function openPanel(kind, seq) {
+  const s = detail.steps.find(x => x.seq === seq);
+  const slot = document.querySelector(`#step-${seq} .slot`);
+  const wasOpen = slot.dataset.kind === kind;
+  closePanels();
+  if (wasOpen) return;
+  slot.dataset.kind = kind;
+  const isTool = s.type === "tool";
+  const sys = isTool ? "" : currentSystem(s.input);
+  const model = (s.input && s.input.kwargs && s.input.kwargs.model) || s.name;
+  const replay = seq > 1 ? `Steps 1 to ${seq - 1} replay from cache for free. ` : "";
+  const close = `<button class="link" type="button" data-close>Cancel</button>`;
+
+  if (kind === "fork") {
+    slot.innerHTML = `<form class="panel" novalidate>
+      <div class="panel-head"><h3>Try a change at step ${seq}</h3>${close}</div>
+      <p>${replay}Step ${seq} runs with your change, and every step after it runs live, so you see how the rest of the run reacts.</p>
+      ${isTool
+        ? field("output", `What should <code>${esc(s.name)}</code> return instead?`, "This is what it returned in the original run. Edit it to pretend the tool gave a different answer.", fmtOut(s.output), 6)
+        : field("model", "Model", `The original run used <code>${esc(model)}</code>. A new model applies to this and every later LLM call.`, model) +
+          field("system", "System prompt", "This is the original prompt. Edit it to try new instructions.", sys, 5)}
+      <div class="go"><button class="btn primary" type="submit">Run with this change</button><span class="msg"></span></div></form>`;
+    const form = slot.querySelector("form");
+    form.onsubmit = ev => {
+      ev.preventDefault();
+      const body = {run_id: current, step: seq};
+      const v = n => form.elements[n].value;
+      if (isTool) { if (v("output") !== fmtOut(s.output)) body.output = v("output"); }
+      else {
+        if (v("model").trim() && v("model").trim() !== model) body.model = v("model").trim();
+        if (v("system") !== sys) body.system = v("system");
+      }
+      if (!body.output && !body.model && body.system === undefined)
+        return say(form, "Nothing has changed yet. Edit a field above, then run it.", true);
+      run(form, "Running your change", async () => {
+        const res = await api("/api/fork", body);
+        flash = res.run_id;
+        await loadRuns();
+        go(res.run_id);
+      });
+    };
+  } else {
+    const kinds = isTool ? [["output", "Tool result"]] : [["model", "Model"], ["system", "System prompt"]];
+    slot.innerHTML = `<form class="panel" novalidate>
+      <div class="panel-head"><h3>Test several changes at step ${seq}</h3>${close}</div>
+      <p>Each change runs a few times, and you get a table showing which one passes most often. The original run is always included as the first row, so you can see whether a change is actually better.</p>
+      ${kinds.length > 1 ? `<div class="field"><span class="lbl">What do you want to change?</span><div class="seg" role="group">${kinds.map(([v, t], i) =>
+        `<button type="button" data-kind="${v}" aria-pressed="${i === 0}">${t}</button>`).join("")}</div></div>` : ""}
+      <div class="field"><span class="lbl vtitle"></span><small class="vhint"></small><div class="variants"></div>
+        <div><button class="link" type="button" data-add>Add another</button></div></div>
+      <div class="cols">
+        ${field("repeat", "Runs per change", "", "3")}
+        ${field("expect", "A run passes if the final output contains", "For example the correct number or a word the answer must include. Leave blank to skip scoring.", "")}
+      </div>
+      <div class="go"><button class="btn primary" type="submit">Run the test</button><span class="cost"></span><span class="msg"></span></div>
+      <div class="results"></div></form>`;
+    const form = slot.querySelector("form");
+    form.elements.expect.placeholder = "e.g. 49.99";
+    form.elements.repeat.type = "number"; form.elements.repeat.min = 1; form.elements.repeat.max = 10;
+    const original = {model, system: sys, output: compact(s.output)};
+    const titles = {model: "Models to try", system: "System prompts to try", output: "Tool results to try"};
+    const firstValue = {model: "", system: sys, output: compact(s.output)};
+    const hints = {model: `The original model, ${model}, is always tested too. Add the models you want to compare it with.`,
+      system: "Change 1 starts as a copy of the original prompt. Edit it, or add more versions below. The original is always tested too.",
+      output: "Change 1 starts as a copy of what the tool returned. Edit it to pretend the tool gave a different answer."};
+    const box = form.querySelector(".variants");
+    let k = kinds[0][0];
+
+    const values = () => [...box.querySelectorAll("[data-v]")].map(el => el.value).filter(v => v.trim());
+    const updateCost = () => {
+      const n = values().length * Math.max(1, Math.min(10, +form.elements.repeat.value || 1));
+      form.querySelector(".cost").textContent = n ? `${plural(n, "run")} from step ${seq} onward, using your real API keys` : "";
+    };
+    const addVariant = (value = "") => {
+      const i = box.children.length + 1;
+      const input = k === "model"
+        ? `<input data-v value="${esc(value)}" placeholder="${i === 1 ? "e.g. gpt-4o" : "another model"}">`
+        : `<textarea data-v rows="${k === "system" ? 3 : 2}" placeholder="${k === "system" ? "Write a new system prompt" : "A different tool result"}">${esc(value)}</textarea>`;
+      box.insertAdjacentHTML("beforeend", `<div class="variant field"><span class="vn">Change ${i}</span>${input}<button class="link" type="button" data-remove>Remove</button></div>`);
+      updateCost();
+    };
+    const renumber = () => box.querySelectorAll(".vn").forEach((el, i) => el.textContent = `Change ${i + 1}`);
+    const setKind = nk => {
+      k = nk;
+      form.querySelectorAll(".seg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.kind === k)));
+      form.querySelector(".vtitle").textContent = titles[k];
+      form.querySelector(".vhint").textContent = hints[k];
+      box.innerHTML = "";
+      addVariant(firstValue[k]);
+      if (k === "model") addVariant();
+    };
+    setKind(k);
+    form.addEventListener("input", updateCost);
+    form.addEventListener("click", e => {
+      if (e.target.dataset.kind) setKind(e.target.dataset.kind);
+      if (e.target.dataset.add !== undefined) { addVariant(); box.lastElementChild.querySelector("[data-v]").focus(); }
+      if (e.target.dataset.remove !== undefined) {
+        if (box.children.length > 1) e.target.closest(".variant").remove(); else e.target.closest(".variant").querySelector("[data-v]").value = "";
+        renumber(); updateCost();
+      }
+    });
+    form.onsubmit = ev => {
+      ev.preventDefault();
+      const vals = values();
+      if (!vals.length) return say(form, "Add at least one change to test.", true);
+      const same = vals.findIndex(v => v.trim() === String(original[k]).trim());
+      if (same >= 0) return say(form, `Change ${same + 1} is the same as the original. Edit it or remove it.`, true);
+      const repeat = Math.max(1, Math.min(10, +form.elements.repeat.value || 1));
+      const expect = form.elements.expect.value.trim() || null;
+      run(form, `Running ${plural(vals.length * repeat, "run")}`, async () => {
+        const res = await api("/api/sweep", {run_id: current, step: seq, kind: k, values: vals, repeat, expect});
+        form.querySelector(".results").innerHTML = sweepHtml(res);
+        say(form, "");
+        loadRuns();
+      });
+    };
+  }
+  slot.querySelector("[data-close]").onclick = closePanels;
+  const first = slot.querySelector("textarea,input:not([type=number])");
+  if (first) first.focus();
+}
+
+function say(form, text, bad) {
+  const m = form.querySelector(".msg");
+  m.textContent = text;
+  m.className = "msg" + (bad ? " err" : "");
+}
+
+async function run(form, label, fn) {
+  const btn = form.querySelector("[type=submit]");
+  btn.disabled = true;
+  const t0 = Date.now();
+  const tick = () => say(form, `${label}… ${Math.round((Date.now() - t0) / 1000)}s`);
+  tick();
+  const timer = setInterval(tick, 1000);
+  try { await fn(); } catch (err) { say(form, err.message, true); }
+  finally { clearInterval(timer); btn.disabled = false; }
+}
+
+function sweepHtml(res) {
+  const groups = res.groups;
+  const hasExpect = groups.some(g => g.passed !== null);
+  const rate = g => g.passed / g.runs;
+  let best = null;
+  if (hasExpect) {
+    best = groups.slice(1).reduce((b, g) => !b || rate(g) > rate(b) || (rate(g) === rate(b) && g.avg_tokens < b.avg_tokens) ? g : b, null);
+    if (best && rate(best) <= rate(groups[0])) best = null;
+  }
+  const label = (g, i) => i === 0 ? "Original" : g.label.startsWith("model=") ? g.label.slice(6) : `Change ${i}`;
+  const dots = g => `<span class="dots" aria-label="${g.passed} of ${g.runs} passed">${
+    Array.from({length: g.runs}, (_, i) => `<i class="${i < g.passed ? "p" : ""}"></i>`).join("")}<b>${g.passed}/${g.runs}</b></span>`;
+  const rows = groups.map((g, i) => `<tr class="${g === best ? "best" : ""}">
+    <td><div class="vlabel">${esc(label(g, i))}</div>${g.value ? `<div class="vvalue">${esc(clip(g.value, 160))}</div>` : ""}</td>
+    ${hasExpect ? `<td>${dots(g)}</td>` : ""}
+    <td class="num">${g.ok}/${g.runs}</td>
+    <td class="num">${fmtNum(g.avg_tokens)}</td>
+    <td class="num">${g.avg_time_s}s</td>
+    <td class="sample">${esc(g.sample)}</td>
+    <td>${g.run_ids.map(id => `<button class="link mono" data-goto="${id}">${short(id)}</button>`).join(" ")}</td></tr>`).join("");
+  const bi = groups.indexOf(best);
+  const verdict = !hasExpect
+    ? `<p class="verdict quiet">Add pass text next time to get a pass rate for each change.</p>`
+    : best
+    ? `<p class="verdict"><b>${esc(label(best, bi))}</b> passed ${best.passed} of ${best.runs} runs, compared with ${groups[0].passed} of ${groups[0].runs} for the original.${best.run_ids.length ? ` <button class="link" data-goto="${best.run_ids[0]}">Open one of its runs</button>` : ""}</p>`
+    : `<p class="verdict">None of the changes passed more often than the original. Try different changes, or test a different step.</p>`;
+  return `<h4>Results</h4><table><thead><tr><th>Change</th>${hasExpect ? "<th>Passed</th>" : ""}<th>Finished without error</th><th>Avg tokens</th><th>Avg time</th><th>Example output</th><th>Runs</th></tr></thead>
+    <tbody>${rows}</tbody></table>${verdict}`;
+}
+
+/* ---------- compare ---------- */
+
+async function compare(a, b) {
+  current = null;
+  selected = new Set([a, b]);
+  renderTree();
+  let A, B;
+  try { [A, B] = await Promise.all([api("/api/runs/" + a), api("/api/runs/" + b)]); }
+  catch (err) { $("#main").innerHTML = `<div class="empty"><h2>Couldn't compare these runs</h2><p>${esc(err.message)}</p></div>`; return; }
+  const by = d => Object.fromEntries(d.steps.map(s => [s.seq, s]));
+  const sa = by(A), sb = by(B);
+  const seqs = [...new Set([...A.steps, ...B.steps].map(s => s.seq))].sort((x, y) => x - y);
+  const same = q => sa[q] && sb[q] && sa[q].name === sb[q].name && sa[q].summary === sb[q].summary;
+  const first = seqs.find(q => !same(q));
+  const cell = s => s ? `<div class="k"><span class="step ${s.type}"><span class="kind">${s.type === "llm" ? "LLM" : "tool"}</span></span><b>${esc(s.name)}</b>${s.cached ? '<span class="tag">from cache</span>' : ""}</div><div class="summary" style="margin:0">${describe(s)}</div>` : '<span class="quiet">No step</span>';
+  const head = r => `<button class="link mono" data-goto="${r.run.id}">${short(r.run.id)}</button> <span class="quiet">${r.run.parent_run_id ? "fork" : "original"}</span>`;
+  const outSame = JSON.stringify(A.output) === JSON.stringify(B.output);
+  $("#main").innerHTML = `<div class="wrap">
+    <div class="run-title"><h1>Comparing two runs</h1></div>
+    <p class="diverge">${first === undefined
+      ? (outSame ? "Every step and the final output are the same." : "Every step is the same, but the final outputs differ.")
+      : first === 1 ? "The runs differ from the very first step. Highlighted rows show where they differ."
+      : `The runs are the same up to step ${first - 1} and first differ at step ${first}. Highlighted rows show where they differ.`}</p>
+    <table class="cmp"><thead><tr><th>Step</th><th>${head(A)}</th><th>${head(B)}</th></tr></thead><tbody>
+    ${seqs.map(q => `<tr class="${same(q) ? "same" : "diff"} ${q === first ? "first" : ""}"><td>${q}</td><td>${cell(sa[q])}</td><td>${cell(sb[q])}</td></tr>`).join("")}
+    <tr class="${outSame ? "same" : "diff"}"><td>Final</td><td>${esc(fmtOut(A.output))}</td><td>${esc(fmtOut(B.output))}</td></tr>
+    </tbody></table></div>`;
+}
+
+/* ---------- routing ---------- */
+
+function emptyMain() {
+  $("#main").innerHTML = `<div class="wrap"><div class="empty"><h2>Record your first run</h2>
+    <p>agentfork shows runs of your own agent. Three changes to your code are enough:</p>
+    <ol>
+      <li>Wrap your LLM client so every call is recorded.<pre>from agentfork import trace, tool, wrap_openai
+client = wrap_openai(OpenAI())   # or wrap_anthropic(Anthropic())</pre></li>
+      <li>Mark each tool function with <code>@tool</code> and your agent's main function with <code>@trace</code>.<pre>@tool
+def lookup_order(order_id): ...
+
+@trace
+def run_agent(question): ...</pre></li>
+      <li>Run your agent as usual, then refresh this page. Runs are saved in <code>.agentfork/</code> in the folder you ran it from, so start <code>agentfork ui</code> from that same folder.</li>
+    </ol></div></div>`;
+}
+
+function route() {
+  const h = decodeURIComponent(location.hash.slice(1));
+  if (h.startsWith("run=")) return showRun(h.slice(4));
+  if (h.startsWith("compare=")) { const [a, b] = h.slice(8).split(","); return compare(a, b); }
+  if (runs.length) return go(runs[0].id);
+  emptyMain();
+}
+
+window.addEventListener("hashchange", route);
+loadRuns().then(route).catch(err => { $("#main").innerHTML = `<div class="empty"><h2>Couldn't load runs</h2><p>${esc(err.message)}</p></div>`; });
+</script>
+</body>
+</html>

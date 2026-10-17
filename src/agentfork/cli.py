@@ -257,3 +257,20 @@ def sweep(run_id: str = typer.Argument(..., help="Run to sweep."),
         key, value = next(iter(v.items()))
         if key != "model":
             console.print(f"[bold]{labels[id(v)]}[/bold]: {value}")
+
+@app.command()
+def ui(port: int = typer.Option(8000, "--port", help="Port for the local web UI."),
+       no_browser: bool = typer.Option(False, "--no-browser", help="Don't open a browser.")):
+    """Open the local web UI: runs, timelines, fork, sweep and compare."""
+    try:
+        import uvicorn
+        from .server import app as web_app
+    except ImportError:
+        console.print('[red]The UI needs extra packages: pip install "agentfork-cli[ui]"[/red]')
+        raise typer.Exit(1)
+    url = f"http://127.0.0.1:{port}"
+    console.print(f"[green]agentfork UI running at {url}[/green]  (Ctrl+C to stop)")
+    if not no_browser:
+        import threading, webbrowser
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    uvicorn.run(web_app, host="127.0.0.1", port=port, log_level="warning")

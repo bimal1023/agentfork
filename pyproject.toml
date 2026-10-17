@@ -1,6 +1,6 @@
 [project]
 name = "agentfork-cli"
-version = "0.1.0"
+version = "0.2.0"
 description = "Fork your LLM agent at any step and sweep prompts, models or tool results to find what fixes it."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -19,7 +19,8 @@ dependencies = ["typer", "rich"]
 [project.optional-dependencies]
 openai = ["openai"]
 anthropic = ["anthropic"]
-dev = ["pytest", "openai", "anthropic"]
+ui = ["fastapi", "uvicorn"]
+dev = ["pytest", "openai", "anthropic", "fastapi", "uvicorn", "httpx"]
 
 [project.urls]
 Homepage = "https://github.com/bimal1023/agentfork"
